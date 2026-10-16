@@ -17,6 +17,7 @@ import Toolbar from "@/components/editor/Toolbar";
 import ElementsPanel from "@/components/editor/ElementsPanel";
 import PropertiesPanel from "@/components/editor/PropertiesPanel";
 import LayersPanel from "@/components/editor/LayersPanel";
+import TemplatesPanel from "@/components/editor/TemplatesPanel";
 import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
 import PagesBar from "@/components/editor/PagesBar";
@@ -357,27 +358,71 @@ export default function Editor({ project }) {
 
   /* ----------------------------- export ------------------------------ */
 
-  function handleExport() {
+  function safeBase() {
+    return (
+      (useEditorStore.getState().projectName || "design")
+        .replace(/[^\w-]+/g, "_")
+        .replace(/^_+|_+$/g, "") || "design"
+    );
+  }
+
+  function triggerDownload(href, filename, revoke) {
+    const a = document.createElement("a");
+    a.href = href;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    if (revoke) setTimeout(() => URL.revokeObjectURL(href), 1000);
+  }
+
+  async function exportAllPagesPDF(base) {
+    const c = controllerRef.current;
+    const { jsPDF } = await import("jspdf");
+    const { pages: cur, activePageId: act } = pagesRef.current;
+    const captured = captureActive(cur, act);
+    let pdf = null;
+    for (let i = 0; i < captured.length; i++) {
+      const pg = captured[i];
+      const dataURL = await c.renderPageJSON(pg.json, pg.width, pg.height, 1);
+      const orientation = pg.width >= pg.height ? "l" : "p";
+      if (i === 0) {
+        pdf = new jsPDF({
+          orientation,
+          unit: "px",
+          format: [pg.width, pg.height],
+          hotfixes: ["px_scaling"],
+        });
+      } else {
+        pdf.addPage([pg.width, pg.height], orientation);
+      }
+      pdf.addImage(dataURL, "PNG", 0, 0, pg.width, pg.height);
+    }
+    pdf.save(`${base}.pdf`);
+  }
+
+  async function handleExport(format = "png") {
     const c = controllerRef.current;
     if (!c) return;
+    const base = safeBase();
     try {
-      const url = c.exportPNG();
-      const base = (useEditorStore.getState().projectName || "thumbnail")
-        .replace(/[^\w-]+/g, "_")
-        .replace(/^_+|_+$/g, "");
-      const pageIdx = pagesRef.current.pages.findIndex(
-        (p) => p.id === pagesRef.current.activePageId
-      );
-      const suffix = pagesRef.current.pages.length > 1 ? `-page-${pageIdx + 1}` : "";
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${base || "thumbnail"}${suffix}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      if (format === "svg") {
+        const svg = c.exportSVG();
+        const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+        triggerDownload(url, `${base}.svg`, true);
+      } else if (format === "pdf") {
+        await exportAllPagesPDF(base);
+      } else {
+        const pageIdx = pagesRef.current.pages.findIndex(
+          (p) => p.id === pagesRef.current.activePageId
+        );
+        const suffix =
+          pagesRef.current.pages.length > 1 ? `-page-${pageIdx + 1}` : "";
+        triggerDownload(c.exportPNG(), `${base}${suffix}.png`);
+      }
     } catch (err) {
       console.error("Export failed:", err);
-      showToast("Could not export the image.");
+      showToast("Could not export the design.");
     }
   }
 
@@ -389,7 +434,7 @@ export default function Editor({ project }) {
     <button
       type="button"
       onClick={() => setLeftTab(id)}
-      className={`flex-1 border-b-2 px-3 py-2.5 text-sm font-medium transition ${
+      className={`flex-1 border-b-2 px-1 py-2.5 text-[13px] font-medium transition ${
         leftTab === id
           ? "border-brand-500 text-brand-700"
           : "border-transparent text-slate-500 hover:text-slate-700"
@@ -414,12 +459,15 @@ export default function Editor({ project }) {
           <div className="flex border-b border-slate-200">
             {leftTabBtn("elements", "Elements")}
             {leftTabBtn("layers", "Layers")}
+            {leftTabBtn("templates", "Templates")}
           </div>
           <div className="ds-scroll min-h-0 flex-1 overflow-y-auto">
             {leftTab === "elements" ? (
               <ElementsPanel controllerRef={controllerRef} />
-            ) : (
+            ) : leftTab === "layers" ? (
               <LayersPanel controllerRef={controllerRef} />
+            ) : (
+              <TemplatesPanel controllerRef={controllerRef} />
             )}
           </div>
         </aside>

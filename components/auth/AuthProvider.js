@@ -1,0 +1,94 @@
+"use client";
+
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
+
+/**
+ * Auth context for optional cloud features. When Supabase is not configured the
+ * provider still renders and reports `configured: false` / `user: null`, so the
+ * UI can hide cloud affordances and the app runs local-only.
+ */
+const AuthContext = createContext({
+  configured: false,
+  loading: false,
+  user: null,
+  session: null,
+  signInWithPassword: async () => {},
+  signUpWithPassword: async () => {},
+  signInWithMagicLink: async () => {},
+  signOut: async () => {},
+});
+
+export function AuthProvider({ children }) {
+  const configured = isSupabaseConfigured();
+  const [loading, setLoading] = useState(configured);
+  const [session, setSession] = useState(null);
+
+  useEffect(() => {
+    if (!configured) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    let active = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setSession(data.session ?? null);
+      setLoading(false);
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+      setSession(next ?? null);
+    });
+    return () => {
+      active = false;
+      sub?.subscription?.unsubscribe();
+    };
+  }, [configured]);
+
+  const signInWithPassword = useCallback(async (email, password) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Cloud is not configured.");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  }, []);
+
+  const signUpWithPassword = useCallback(async (email, password) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Cloud is not configured.");
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+  }, []);
+
+  const signInWithMagicLink = useCallback(async (email) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Cloud is not configured.");
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
+    });
+    if (error) throw error;
+  }, []);
+
+  const signOut = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    await supabase.auth.signOut();
+  }, []);
+
+  const value = {
+    configured,
+    loading,
+    session,
+    user: session?.user ?? null,
+    signInWithPassword,
+    signUpWithPassword,
+    signInWithMagicLink,
+    signOut,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth() {
+  return useContext(AuthContext);
+}

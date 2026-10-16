@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Trash2,
   Copy,
@@ -13,19 +13,12 @@ import {
   BringToFront,
   SendToBack,
   MousePointerClick,
+  FlipHorizontal,
+  FlipVertical,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { SIZE_PRESETS, clampDim } from "@/lib/db/projects";
-
-const FONTS = [
-  "Inter",
-  "Arial",
-  "Georgia",
-  "Times New Roman",
-  "Courier New",
-  "Verdana",
-  "Impact",
-];
+import { FONTS } from "@/lib/fonts";
 
 function Row({ label, children }) {
   return (
@@ -73,6 +66,172 @@ function Toggle({ active, onClick, title, children }) {
     >
       {children}
     </button>
+  );
+}
+
+const CROPS = [
+  { label: "Original", value: null },
+  { label: "1:1", value: 1 },
+  { label: "4:3", value: 4 / 3 },
+  { label: "16:9", value: 16 / 9 },
+  { label: "3:4", value: 3 / 4 },
+  { label: "9:16", value: 9 / 16 },
+];
+
+const MASKS = [
+  { label: "None", value: "none" },
+  { label: "Circle", value: "circle" },
+  { label: "Rounded", value: "rounded" },
+  { label: "Triangle", value: "triangle" },
+  { label: "Diamond", value: "diamond" },
+];
+
+function FillControl({ sel, controllerRef, allowImage }) {
+  const c = () => controllerRef.current;
+  const fileRef = useRef(null);
+  const fillType = sel.fillType || "solid";
+  const grad = sel.gradient || {
+    type: "linear",
+    colors: [typeof sel.fill === "string" ? sel.fill : "#6366f1", "#ec4899"],
+    angle: 90,
+  };
+
+  const chooseType = (t) => {
+    if (t === "solid") {
+      c()?.setSolidFill(typeof sel.fill === "string" ? sel.fill : "#6366f1");
+    } else if (t === "gradient") {
+      c()?.setGradientFill(grad);
+    } else if (t === "image") {
+      fileRef.current?.click();
+    }
+  };
+  const updateGrad = (patch) => c()?.setGradientFill({ ...grad, ...patch });
+
+  function handleFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (f) c()?.fillWithImageFromFile(f).catch(() => {});
+  }
+
+  const tabs = ["solid", "gradient", ...(allowImage ? ["image"] : [])];
+  const tabLabel = { solid: "Solid", gradient: "Gradient", image: "Image" };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1">
+        {tabs.map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => chooseType(t)}
+            className={`flex-1 rounded-md border py-1 text-xs font-medium transition ${
+              fillType === t
+                ? "border-brand-500 bg-brand-50 text-brand-700"
+                : "border-slate-200 text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {tabLabel[t]}
+          </button>
+        ))}
+      </div>
+
+      {fillType === "solid" && (
+        <ColorField value={sel.fill} onChange={(v) => c()?.setSolidFill(v)} />
+      )}
+
+      {fillType === "gradient" && (
+        <div className="space-y-2">
+          <div className="flex gap-1.5">
+            <Toggle
+              title="Linear"
+              active={grad.type === "linear"}
+              onClick={() => updateGrad({ type: "linear" })}
+            >
+              <span className="text-xs">Linear</span>
+            </Toggle>
+            <Toggle
+              title="Radial"
+              active={grad.type === "radial"}
+              onClick={() => updateGrad({ type: "radial" })}
+            >
+              <span className="text-xs">Radial</span>
+            </Toggle>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="color"
+              value={grad.colors[0]}
+              onChange={(e) => updateGrad({ colors: [e.target.value, grad.colors[1]] })}
+              className="h-9 flex-1 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+              aria-label="Gradient start"
+            />
+            <input
+              type="color"
+              value={grad.colors[1]}
+              onChange={(e) => updateGrad({ colors: [grad.colors[0], e.target.value] })}
+              className="h-9 flex-1 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+              aria-label="Gradient end"
+            />
+          </div>
+          {grad.type === "linear" && (
+            <div>
+              <div className="flex justify-between text-[11px] text-slate-500">
+                <span>Angle</span>
+                <span className="tabular-nums">{Math.round(grad.angle)}°</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                value={grad.angle}
+                onChange={(e) => updateGrad({ angle: Number(e.target.value) })}
+                className="w-full accent-brand-600"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {fillType === "image" && (
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="w-full rounded-md border border-slate-200 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+        >
+          Replace image
+        </button>
+      )}
+
+      {allowImage && (
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFile}
+          className="hidden"
+        />
+      )}
+    </div>
+  );
+}
+
+function AdjustSlider({ label, value, onChange }) {
+  const pct = Math.round((value ?? 0) * 100);
+  return (
+    <div>
+      <div className="flex justify-between text-[11px] text-slate-500">
+        <span>{label}</span>
+        <span className="tabular-nums">{pct}</span>
+      </div>
+      <input
+        type="range"
+        min={-100}
+        max={100}
+        value={pct}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        className="w-full accent-brand-600"
+      />
+    </div>
   );
 }
 
@@ -244,13 +403,13 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
           <div className="grid grid-cols-2 gap-3">
             <Row label="Font">
               <select
-                value={sel.fontFamily || "Inter"}
-                onChange={(e) => set("fontFamily", e.target.value)}
+                value={sel.fontFamily || FONTS[0].css}
+                onChange={(e) => c()?.setActiveFont(e.target.value)}
                 className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-brand-500"
               >
                 {FONTS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
+                  <option key={f.label} value={f.css}>
+                    {f.label}
                   </option>
                 ))}
               </select>
@@ -323,21 +482,207 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
               <AlignRight size={16} />
             </Toggle>
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Row label={`Letter spacing (${Math.round(sel.charSpacing ?? 0)})`}>
+              <input
+                type="range"
+                min={-50}
+                max={400}
+                value={sel.charSpacing ?? 0}
+                onChange={(e) => set("charSpacing", Number(e.target.value))}
+                className="w-full accent-brand-600"
+              />
+            </Row>
+            <Row label={`Line height (${(sel.lineHeight ?? 1.16).toFixed(2)})`}>
+              <input
+                type="range"
+                min={0.5}
+                max={2.5}
+                step={0.05}
+                value={sel.lineHeight ?? 1.16}
+                onChange={(e) => set("lineHeight", Number(e.target.value))}
+                className="w-full accent-brand-600"
+              />
+            </Row>
+          </div>
+
+          {/* Text effects */}
+          <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Effects
+            </p>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-slate-600">Shadow</span>
+              <Toggle
+                title="Toggle shadow"
+                active={!!sel.hasShadow}
+                onClick={() => c()?.setShadow(!sel.hasShadow, sel.shadowColor)}
+              >
+                <span className="text-xs font-medium">
+                  {sel.hasShadow ? "On" : "Off"}
+                </span>
+              </Toggle>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-slate-600">Highlight</span>
+              <div className="flex items-center gap-2">
+                {sel.textBackgroundColor ? (
+                  <input
+                    type="color"
+                    value={sel.textBackgroundColor}
+                    onChange={(e) => set("textBackgroundColor", e.target.value)}
+                    className="h-8 w-9 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+                  />
+                ) : null}
+                <Toggle
+                  title="Toggle highlight"
+                  active={!!sel.textBackgroundColor}
+                  onClick={() =>
+                    set(
+                      "textBackgroundColor",
+                      sel.textBackgroundColor ? "" : "#fde047"
+                    )
+                  }
+                >
+                  <span className="text-xs font-medium">
+                    {sel.textBackgroundColor ? "On" : "Off"}
+                  </span>
+                </Toggle>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {sel.isImage && (
+        <>
+          <Row label="Flip">
+            <div className="flex gap-1.5">
+              <Toggle
+                title="Flip horizontal"
+                active={!!sel.flipX}
+                onClick={() => c()?.flipImage("x")}
+              >
+                <FlipHorizontal size={16} />
+              </Toggle>
+              <Toggle
+                title="Flip vertical"
+                active={!!sel.flipY}
+                onClick={() => c()?.flipImage("y")}
+              >
+                <FlipVertical size={16} />
+              </Toggle>
+            </div>
+          </Row>
+
+          <Row label="Crop">
+            <div className="grid grid-cols-3 gap-1.5">
+              {CROPS.map((cp) => (
+                <button
+                  key={cp.label}
+                  type="button"
+                  onClick={() => c()?.setImageCrop(cp.value)}
+                  className="rounded-md border border-slate-200 py-1.5 text-xs text-slate-600 transition hover:bg-slate-50"
+                >
+                  {cp.label}
+                </button>
+              ))}
+            </div>
+          </Row>
+
+          <Row label="Mask">
+            <div className="grid grid-cols-3 gap-1.5">
+              {MASKS.map((m) => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => c()?.setImageMask(m.value)}
+                  className={`rounded-md border py-1.5 text-xs transition ${
+                    sel.maskShape === m.value
+                      ? "border-brand-500 bg-brand-50 text-brand-700"
+                      : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </Row>
+
+          <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Adjust
+            </p>
+            <AdjustSlider
+              label="Brightness"
+              value={sel.brightness}
+              onChange={(v) => c()?.setImageAdjustments({ brightness: v })}
+            />
+            <AdjustSlider
+              label="Contrast"
+              value={sel.contrast}
+              onChange={(v) => c()?.setImageAdjustments({ contrast: v })}
+            />
+            <AdjustSlider
+              label="Saturation"
+              value={sel.saturation}
+              onChange={(v) => c()?.setImageAdjustments({ saturation: v })}
+            />
+            <div className="flex items-center justify-between pt-1">
+              <span className="text-sm text-slate-600">Grayscale</span>
+              <Toggle
+                title="Toggle grayscale"
+                active={!!sel.grayscale}
+                onClick={() =>
+                  c()?.setImageAdjustments({ grayscale: !sel.grayscale })
+                }
+              >
+                <span className="text-xs font-medium">
+                  {sel.grayscale ? "On" : "Off"}
+                </span>
+              </Toggle>
+            </div>
+          </div>
         </>
       )}
 
       {showFill && (
-        <Row label={isText ? "Text color" : "Fill"}>
-          <ColorField value={sel.fill} onChange={(v) => set("fill", v)} />
+        <Row label={isText ? "Text fill" : "Fill"}>
+          <FillControl
+            sel={sel}
+            controllerRef={controllerRef}
+            allowImage={!isText}
+          />
         </Row>
+      )}
+
+      {/* Shadow for shapes */}
+      {!isText && !sel.isImage && !sel.isMultiple && (
+        <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
+          <span className="text-sm text-slate-600">Shadow</span>
+          <Toggle
+            title="Toggle shadow"
+            active={!!sel.hasShadow}
+            onClick={() => c()?.setShadow(!sel.hasShadow, sel.shadowColor)}
+          >
+            <span className="text-xs font-medium">
+              {sel.hasShadow ? "On" : "Off"}
+            </span>
+          </Toggle>
+        </div>
       )}
 
       {showStroke && (
         <>
-          <Row label="Border color">
+          <Row label={isText ? "Outline color" : "Border color"}>
             <ColorField value={sel.stroke} onChange={(v) => set("stroke", v)} />
           </Row>
-          <Row label={`Border width (${Math.round(sel.strokeWidth ?? 0)})`}>
+          <Row
+            label={`${isText ? "Outline" : "Border"} width (${Math.round(
+              sel.strokeWidth ?? 0
+            )})`}
+          >
             <input
               type="range"
               min={0}

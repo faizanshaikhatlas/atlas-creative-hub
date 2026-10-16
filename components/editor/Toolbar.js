@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Undo2,
@@ -8,6 +9,7 @@ import {
   ZoomOut,
   Maximize,
   Download,
+  ChevronDown,
   Check,
   Loader2,
 } from "lucide-react";
@@ -40,11 +42,37 @@ export default function Toolbar({ controllerRef, onBack, onExport, onSave, onFit
 
   const c = () => controllerRef.current;
 
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef(null);
+  useEffect(() => {
+    function onDown(e) {
+      if (exportRef.current && !exportRef.current.contains(e.target)) {
+        setExportOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  const pick = (fmt) => {
+    setExportOpen(false);
+    onExport(fmt);
+  };
+
   return (
     <header className="flex h-14 items-center gap-1 border-b border-slate-200 bg-white px-2 sm:gap-2 sm:px-4">
       <IconButton title="Back to projects" onClick={onBack}>
         <ArrowLeft size={18} />
       </IconButton>
+
+      {/* ATLAS Creative Hub brand mark */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/brand/atlas-symbol.svg"
+        alt="ATLAS Creative Hub"
+        width={22}
+        height={22}
+        className="ml-0.5 mr-1 hidden h-[22px] w-[22px] shrink-0 sm:block"
+      />
 
       <input
         value={projectName}
@@ -104,16 +132,43 @@ export default function Toolbar({ controllerRef, onBack, onExport, onSave, onFit
 
         <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />
 
-        <button
-          type="button"
-          onClick={onExport}
-          disabled={!canvasReady}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Download size={16} />
-          <span className="hidden sm:inline">Export PNG</span>
-          <span className="sm:hidden">PNG</span>
-        </button>
+        <div className="relative" ref={exportRef}>
+          <button
+            type="button"
+            onClick={() => setExportOpen((v) => !v)}
+            disabled={!canvasReady}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Download size={16} />
+            <span className="hidden sm:inline">Export</span>
+            <ChevronDown size={14} />
+          </button>
+          {exportOpen && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+              <button
+                type="button"
+                onClick={() => pick("png")}
+                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+              >
+                PNG <span className="text-slate-400">· this page</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => pick("svg")}
+                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+              >
+                SVG <span className="text-slate-400">· this page</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => pick("pdf")}
+                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+              >
+                PDF <span className="text-slate-400">· all pages</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

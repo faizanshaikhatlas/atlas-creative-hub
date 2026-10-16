@@ -1,6 +1,8 @@
-# Design Studio
+# ATLAS Creative Hub
 
 A lightweight, Canva-style design editor that runs entirely in the browser.
+(Project directory: `atlas-creative-hub`. The IndexedDB database keeps its
+original name `design-studio` for backward compatibility with saved projects.)
 
 **Milestone 1** — a working **1280 × 720 YouTube thumbnail editor**: artboard,
 image upload, editable text, shapes, selection/movement, zoom, undo/redo, local
@@ -25,6 +27,36 @@ Presentation) plus **custom dimensions**. Each page can be **resized
 independently** (or all at once) from the Properties panel, sizes **persist per
 page**, and **PNG export matches the page's exact dimensions**.
 
+**Milestone 5 — Text power:** a curated set of **8 self-hosted, open-licensed
+fonts** (Inter, Montserrat, Poppins, Oswald, Bebas Neue, Anton, Playfair
+Display, Pacifico), loaded reliably before the canvas renders. Text gains
+**letter spacing**, **line height**, an **outline** (stroke behind the fill), a
+**drop shadow**, and a **highlight** background. Everything persists and
+re-renders with the correct font on reload.
+
+**Milestone 6 — Image editing:** a selected image can be **flipped** (H/V),
+**cropped** to an aspect ratio (non-destructive), **masked** to a shape
+(circle, rounded, triangle, diamond via clipPath), and adjusted with
+**brightness / contrast / saturation** sliders and a **grayscale** toggle
+(Fabric WebGL filters, 2D fallback). All edits persist and re-render on reload.
+(Background removal intentionally deferred — it needs a heavy dependency.)
+
+**Milestone 7 — Elements & fills:** shapes and text can take a **gradient fill**
+(linear/radial, two colour stops, angle), a shape can be **filled with an image**
+(a simple frame / image-holder), and any shape can take a **drop shadow**.
+Gradient/image fills and shadows all persist and re-render on reload.
+
+**Milestone 8 — Templates & components:** three built-in **starter templates**
+(our own original designs that adapt to the page size) you can apply from the
+**Templates** tab, plus **reusable components** — select any object(s), *Save as
+component*, and insert them into any page/project later. Components live in a new
+IndexedDB **v3** store (added without disturbing existing data).
+
+**Milestone 9 — SVG / PDF export:** the toolbar's **Export** menu now offers
+**PNG** (this page), **SVG** (this page, vector), and **PDF** (every page of the
+document, each at its own size/orientation). PDF pages are rendered off-screen
+so the live canvas is never disturbed.
+
 ## Stack
 
 | Concern | Choice |
@@ -36,6 +68,7 @@ page**, and **PNG export matches the page's exact dimensions**.
 | Editor state | Zustand 5 |
 | Local persistence | IndexedDB via Dexie 4 |
 | Icons | Lucide React |
+| PDF export | jsPDF 4 (dynamically imported) |
 
 ## Architecture
 
@@ -74,7 +107,8 @@ lib/
   fabric/canvasController.js   The only module that talks to Fabric
   store/editorStore.js         Zustand UI state
   history/history.js           Undo/redo snapshot stack
-  db/projects.js               Dexie schema + CRUD
+  db/projects.js               Dexie schema + CRUD + size presets
+  fonts.js                     Self-hosted font registry (next/font)
 ```
 
 ## Run it
@@ -128,6 +162,20 @@ npm start
 13. **Page size** (right panel, nothing selected): change the current page's
     size via the preset dropdown or custom W×H, or **Apply to all pages**. Pages
     can have different sizes; **Export PNG** matches the active page exactly.
+14. **Text** (select a text object): pick a **font**, adjust **letter spacing**
+    and **line height**, and toggle **Shadow** / **Highlight**; set an
+    **Outline** via the outline colour + width. Reload — the font re-renders
+    correctly and every effect is preserved.
+15. **Image** (select an uploaded image): **Flip** H/V, **Crop** to a ratio,
+    **Mask** to a shape (circle/rounded/triangle/diamond), and drag the
+    **Brightness / Contrast / Saturation** sliders or toggle **Grayscale**.
+16. **Fills** (select a shape or text): switch Fill to **Gradient** (linear or
+    radial, two colours, angle) or, for shapes, **Image**; toggle a **Shadow**.
+17. **Templates** (left *Templates* tab): click a template to start a page from
+    it. Select object(s) → **Save selection as component**, then click a saved
+    component to insert it into any page or project.
+18. **Export** (toolbar menu): **PNG** or **SVG** for the current page, or
+    **PDF** for the whole multi-page document.
 
 ### Keyboard shortcuts
 
@@ -158,6 +206,22 @@ Two Playwright suites drive the running dev server and assert real canvas state:
 - **Milestone 4** (preset + custom sizes, dimension clamping, per-page resize,
   per-page size isolation, export-matches-size, size persistence across reload,
   apply-to-all): **17/17** checks, zero console errors.
+- **Milestone 5** (font picker, font face actually loaded & applied, letter
+  spacing + line height, outline/paintFirst, shadow on/off, highlight, and all
+  of it persisting + re-loading the font across reload): **19/19** checks, zero
+  console errors.
+- **Milestone 6** (flip H/V, aspect crop + original, clipPath masks, merge-apply
+  filters brightness/contrast/saturation/grayscale, and all of it persisting
+  across reload): **21/21** checks, zero console errors.
+- **Milestone 7** (linear/radial gradient fills on shapes + text, solid reset,
+  shape shadows, image-fill patterns, and all of it persisting): **11/11**
+  checks, zero console errors.
+- **Milestone 8** (apply template + size adaptation, export selection with PNG
+  thumbnail, save/insert/delete components, component persistence across projects
+  via the v3 store): **9/9** checks, zero console errors.
+- **Milestone 9** (SVG string + download, offscreen page render, multi-page PDF
+  download with %PDF header, PNG download): **13/13** checks, zero console
+  errors.
 
 ## Known limitations
 
@@ -170,14 +234,19 @@ Two Playwright suites drive the running dev server and assert real canvas state:
 - **Very large custom sizes** (near the 5000px cap, especially with several
   images) increase canvas memory and export time; dimensions are clamped to
   50–5000px per side.
-- **Fonts.** Inter is self-hosted (no external CDN). The other font choices
-  (Arial, Georgia, Impact, …) render with whatever the viewer's OS provides, so
-  they can look slightly different across systems.
+- **Fonts.** All 8 fonts are self-hosted via `next/font` (no runtime CDN); they
+  are fetched from Google Fonts **at build time**, so building requires network
+  access. Single-weight display fonts (Bebas Neue, Anton, Pacifico) use the
+  browser's synthesized "faux bold" when bolded.
 - **Images are embedded.** Uploaded images are stored as data URLs inside the
   project, so many large images increase the stored project size.
-- **Scope.** PNG is the only export format so far; templates, text effects,
-  image editing (crop/mask/filters) and gradient fills are planned for later
-  milestones.
+- **PDF export rasterises** each page (embeds a full-res PNG per page) rather
+  than producing vector PDF; SVG export is true vector but covers one page.
+  Applying a template replaces the current page's content.
+- **Image crop is aspect-ratio based** (center crop), not a free-form drag-crop;
+  applying a crop after a mask may require re-applying the mask.
+- **Background removal** is intentionally not implemented (needs a heavy
+  in-browser ML dependency).
 - **Layer reorder** uses up/down one-step controls (full drag-and-drop reorder
   is a later enhancement). Nested group editing is single-level.
 - React Strict Mode is intentionally disabled (`next.config.mjs`) because Fabric
