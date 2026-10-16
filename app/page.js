@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Film, Loader2, ImageOff } from "lucide-react";
+import { Plus, Trash2, Film, Loader2, ImageOff, LayoutTemplate } from "lucide-react";
 import {
   listProjects,
   createProject,
@@ -100,6 +100,14 @@ export default function HomePage() {
         </div>
         <div className="flex items-center gap-3">
           <CloudMenu onSynced={refresh} />
+          <button
+            type="button"
+            onClick={() => router.push("/templates")}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-brand-400 hover:text-brand-700"
+          >
+            <LayoutTemplate size={18} />
+            Templates
+          </button>
           <button
             type="button"
             onClick={() => setShowNew(true)}
