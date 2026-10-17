@@ -137,6 +137,24 @@ function Editor({ spec, controllerRef }) {
     push(s);
   };
   const setProp = (patch) => push({ ...clone(spec), ...patch });
+  const setColWidth = (w) => {
+    if (active.c >= spec.cols) return;
+    const s = clone(spec);
+    s.colWidths[active.c] = Math.max(20, Math.min(600, Math.round(Number(w) || DEFAULT_COL_W)));
+    push(s);
+  };
+  const setRowHeight = (h) => {
+    if (active.r >= spec.rows) return;
+    const s = clone(spec);
+    s.rowHeights[active.r] = Math.max(16, Math.min(400, Math.round(Number(h) || DEFAULT_ROW_H)));
+    push(s);
+  };
+  const distribute = () => {
+    const s = clone(spec);
+    s.colWidths = Array(s.cols).fill(DEFAULT_COL_W);
+    s.rowHeights = Array(s.rows).fill(DEFAULT_ROW_H);
+    push(s);
+  };
 
   const cur = (spec.cells[active.r] && spec.cells[active.r][active.c]) || {};
   const tableKey = `${spec.rows}x${spec.cols}`;
@@ -228,6 +246,38 @@ function Editor({ spec, controllerRef }) {
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-slate-500">Text color</span>
           <input type="color" value={cur.color || "#334155"} onChange={(e) => patchActiveCell({ color: e.target.value })} className="h-7 w-9 cursor-pointer rounded border border-slate-200 bg-white p-0.5" aria-label="Cell text color" />
+        </div>
+      </div>
+
+      {/* Column width / row height for the active cell's column & row */}
+      <div className="space-y-2 rounded-lg bg-slate-50 p-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Size (col {active.c + 1}, row {active.r + 1})
+          </p>
+          <button type="button" onClick={distribute} className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50">Reset all</button>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">Column width</span>
+          <input
+            key={`cw-${active.c}-${spec.colWidths[active.c] ?? DEFAULT_COL_W}`}
+            type="number" min={20} max={600}
+            defaultValue={spec.colWidths[active.c] ?? DEFAULT_COL_W}
+            onBlur={(e) => setColWidth(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            className="w-20 rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-700 outline-none focus:border-brand-500"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">Row height</span>
+          <input
+            key={`rh-${active.r}-${spec.rowHeights[active.r] ?? DEFAULT_ROW_H}`}
+            type="number" min={16} max={400}
+            defaultValue={spec.rowHeights[active.r] ?? DEFAULT_ROW_H}
+            onBlur={(e) => setRowHeight(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+            className="w-20 rounded-md border border-slate-200 px-2 py-1 text-sm text-slate-700 outline-none focus:border-brand-500"
+          />
         </div>
       </div>
 

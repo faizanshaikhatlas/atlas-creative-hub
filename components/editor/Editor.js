@@ -22,6 +22,7 @@ import BrandKitPanel from "@/components/editor/BrandKitPanel";
 import TemplatesPanel from "@/components/editor/TemplatesPanel";
 import ChartsPanel from "@/components/editor/ChartsPanel";
 import TablesPanel from "@/components/editor/TablesPanel";
+import QRPanel from "@/components/editor/QRPanel";
 import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
 import ShortcutsOverlay from "@/components/editor/ShortcutsOverlay";
@@ -546,6 +547,7 @@ export default function Editor({ project }) {
             {leftTabBtn("brand", "Brand")}
             {leftTabBtn("charts", "Charts")}
             {leftTabBtn("tables", "Tables")}
+            {leftTabBtn("qr", "QR")}
             {leftTabBtn("layers", "Layers")}
             {leftTabBtn("templates", "Templates")}
           </div>
@@ -560,6 +562,8 @@ export default function Editor({ project }) {
               <ChartsPanel controllerRef={controllerRef} />
             ) : leftTab === "tables" ? (
               <TablesPanel controllerRef={controllerRef} />
+            ) : leftTab === "qr" ? (
+              <QRPanel controllerRef={controllerRef} />
             ) : leftTab === "layers" ? (
               <LayersPanel controllerRef={controllerRef} />
             ) : (
