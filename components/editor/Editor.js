@@ -24,6 +24,7 @@ import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
 import PagesBar from "@/components/editor/PagesBar";
 import ExportDialog from "@/components/editor/ExportDialog";
+import PresentMode from "@/components/editor/PresentMode";
 
 function newPageId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -39,6 +40,7 @@ export default function Editor({ project }) {
   const [leftTab, setLeftTab] = useState("elements");
   const [menu, setMenu] = useState(null);
   const [showExport, setShowExport] = useState(false);
+  const [present, setPresent] = useState(null); // { pages, index } | null
 
   // Multi-page document state. `pagesRef` mirrors it so the autosave callback
   // and page operations always read the latest without stale closures.
@@ -479,6 +481,12 @@ export default function Editor({ project }) {
     triggerDownload(url, `${base}${suffix}.${ext}`);
   }
 
+  function handlePresent() {
+    const captured = captureActive(pagesRef.current.pages, pagesRef.current.activePageId);
+    const index = Math.max(0, captured.findIndex((p) => p.id === pagesRef.current.activePageId));
+    setPresent({ pages: captured, index });
+  }
+
   async function handleBack() {
     // Save any pending change before leaving the editor so nothing is lost.
     try {
@@ -509,6 +517,7 @@ export default function Editor({ project }) {
         controllerRef={controllerRef}
         onBack={handleBack}
         onExport={() => setShowExport(true)}
+        onPresent={handlePresent}
         onSave={doSave}
         onFit={() => fitRef.current?.()}
       />
@@ -678,6 +687,15 @@ export default function Editor({ project }) {
           pageSize={pages.find((p) => p.id === activePageId) || pages[0] || { width: 0, height: 0 }}
           onClose={() => setShowExport(false)}
           onExport={handleExport}
+        />
+      )}
+
+      {present && (
+        <PresentMode
+          pages={present.pages}
+          startIndex={present.index}
+          controllerRef={controllerRef}
+          onClose={() => setPresent(null)}
         />
       )}
 

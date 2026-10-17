@@ -13,6 +13,7 @@ import {
   Loader2,
   Ruler,
   Magnet,
+  Play,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 
@@ -31,7 +32,7 @@ function IconButton({ title, onClick, disabled, children }) {
   );
 }
 
-export default function Toolbar({ controllerRef, onBack, onExport, onSave, onFit }) {
+export default function Toolbar({ controllerRef, onBack, onExport, onPresent, onSave, onFit }) {
   const projectName = useEditorStore((s) => s.projectName);
   const setProjectName = useEditorStore((s) => s.setProjectName);
   const zoom = useEditorStore((s) => s.zoom);
@@ -158,9 +159,22 @@ export default function Toolbar({ controllerRef, onBack, onExport, onSave, onFit
                 <span className="inline-flex items-center gap-2"><Magnet size={15} /> Snap to guides</span>
                 <span className={`text-xs font-medium ${snapEnabled ? "text-brand-600" : "text-slate-400"}`}>{snapEnabled ? "On" : "Off"}</span>
               </button>
+              <div className="my-1 border-t border-slate-100" />
+              <p className="px-3 py-1 text-[11px] text-slate-400">Turn rulers on, then click a ruler to add a guide.</p>
+              <button
+                type="button"
+                onClick={() => { setViewOpen(false); controllerRef.current?.clearGuides(); }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+              >
+                <Ruler size={15} /> Clear guides
+              </button>
             </div>
           )}
         </div>
+
+        <IconButton title="Present (fullscreen)" onClick={() => onPresent?.()} disabled={!canvasReady}>
+          <Play size={18} />
+        </IconButton>
 
         <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />
 

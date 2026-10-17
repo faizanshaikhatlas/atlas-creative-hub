@@ -126,7 +126,7 @@ export default function CanvasStage({
         </div>
       </div>
       {showRulers && (
-        <Rulers outerRef={outerRef} artboardRef={artboardRef} workspaceRef={workspaceRef} />
+        <Rulers outerRef={outerRef} artboardRef={artboardRef} workspaceRef={workspaceRef} controllerRef={controllerRef} />
       )}
     </div>
   );

@@ -21,11 +21,24 @@ function niceInterval(zoom) {
  * `outerRef` is the fixed container; `artboardRef` wraps the <canvas>;
  * `workspaceRef` is the scroll element.
  */
-export default function Rulers({ outerRef, artboardRef, workspaceRef }) {
+export default function Rulers({ outerRef, artboardRef, workspaceRef, controllerRef }) {
   const zoom = useEditorStore((s) => s.zoom);
   const pageSize = useEditorStore((s) => s.pageSize);
   const topRef = useRef(null);
   const leftRef = useRef(null);
+
+  function addGuideFromTop(e) {
+    const art = artboardRef.current;
+    if (!art || !controllerRef?.current) return;
+    const a = art.getBoundingClientRect();
+    controllerRef.current.addGuide("x", (e.clientX - a.left) / (zoom || 1));
+  }
+  function addGuideFromLeft(e) {
+    const art = artboardRef.current;
+    if (!art || !controllerRef?.current) return;
+    const a = art.getBoundingClientRect();
+    controllerRef.current.addGuide("y", (e.clientY - a.top) / (zoom || 1));
+  }
 
   useEffect(() => {
     let raf = 0;
@@ -111,8 +124,8 @@ export default function Rulers({ outerRef, artboardRef, workspaceRef }) {
   return (
     <>
       <div className="pointer-events-none absolute left-0 top-0 z-10 border-b border-r border-slate-200 bg-slate-50" style={{ width: RULER, height: RULER }} />
-      <canvas ref={topRef} className="pointer-events-none absolute top-0 z-10 border-b border-slate-200" style={{ left: RULER }} />
-      <canvas ref={leftRef} className="pointer-events-none absolute left-0 z-10 border-r border-slate-200" style={{ top: RULER }} />
+      <canvas ref={topRef} onClick={addGuideFromTop} title="Click to add a vertical guide" className="absolute top-0 z-10 cursor-pointer border-b border-slate-200" style={{ left: RULER }} />
+      <canvas ref={leftRef} onClick={addGuideFromLeft} title="Click to add a horizontal guide" className="absolute left-0 z-10 cursor-pointer border-r border-slate-200" style={{ top: RULER }} />
     </>
   );
 }
