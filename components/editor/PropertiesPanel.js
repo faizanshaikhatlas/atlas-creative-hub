@@ -125,6 +125,14 @@ const MASKS = [
   { label: "Diamond", value: "diamond" },
 ];
 
+const ANIMATIONS = [
+  ["none", "None"],
+  ["fade", "Fade in"],
+  ["rise", "Rise up"],
+  ["pop", "Pop"],
+  ["slide", "Slide in"],
+];
+
 const BLEND_MODES = [
   ["source-over", "Normal"],
   ["multiply", "Multiply"],
@@ -1037,6 +1045,23 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
         </Row>
       )}
 
+      {!sel.isMultiple && (
+        <Row label="Animation (Present)">
+          <select
+            value={sel.anim || "none"}
+            onChange={(e) => c()?.setActiveAnim(e.target.value)}
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-brand-500"
+          >
+            {ANIMATIONS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Row>
+      )}
+
+      {!sel.isMultiple && (
       <Row label="Size">
         <div className="flex items-center gap-1.5">
           <DimInput
@@ -1064,6 +1089,7 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
           />
         </div>
       </Row>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Row label="X">

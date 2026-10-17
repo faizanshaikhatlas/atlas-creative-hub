@@ -20,6 +20,8 @@ import LayersPanel from "@/components/editor/LayersPanel";
 import BackgroundsPanel from "@/components/editor/BackgroundsPanel";
 import BrandKitPanel from "@/components/editor/BrandKitPanel";
 import TemplatesPanel from "@/components/editor/TemplatesPanel";
+import ChartsPanel from "@/components/editor/ChartsPanel";
+import TablesPanel from "@/components/editor/TablesPanel";
 import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
 import ShortcutsOverlay from "@/components/editor/ShortcutsOverlay";
@@ -367,6 +369,12 @@ export default function Editor({ project }) {
       } else if (meta && (key === "g" || key === "G")) {
         e.preventDefault();
         c.group();
+      } else if (meta && e.shiftKey && (key === "}" || key === "]")) {
+        e.preventDefault();
+        c.bringToFront();
+      } else if (meta && e.shiftKey && (key === "{" || key === "[")) {
+        e.preventDefault();
+        c.sendToBack();
       } else if (meta && key === "]") {
         e.preventDefault();
         c.bringForward();
@@ -536,6 +544,8 @@ export default function Editor({ project }) {
             {leftTabBtn("elements", "Elements")}
             {leftTabBtn("backgrounds", "Background")}
             {leftTabBtn("brand", "Brand")}
+            {leftTabBtn("charts", "Charts")}
+            {leftTabBtn("tables", "Tables")}
             {leftTabBtn("layers", "Layers")}
             {leftTabBtn("templates", "Templates")}
           </div>
@@ -546,6 +556,10 @@ export default function Editor({ project }) {
               <BackgroundsPanel controllerRef={controllerRef} />
             ) : leftTab === "brand" ? (
               <BrandKitPanel controllerRef={controllerRef} />
+            ) : leftTab === "charts" ? (
+              <ChartsPanel controllerRef={controllerRef} />
+            ) : leftTab === "tables" ? (
+              <TablesPanel controllerRef={controllerRef} />
             ) : leftTab === "layers" ? (
               <LayersPanel controllerRef={controllerRef} />
             ) : (

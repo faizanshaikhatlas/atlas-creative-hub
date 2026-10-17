@@ -116,21 +116,25 @@ export default function ContextMenu({ menu, controllerRef, onClose }) {
             <Item
               icon={<ArrowUpToLine size={15} />}
               label="Bring to front"
+              shortcut="Ctrl+Shift+]"
               onClick={run((c) => c?.bringToFront())}
             />
             <Item
               icon={<ArrowUp size={15} />}
               label="Bring forward"
+              shortcut="Ctrl+]"
               onClick={run((c) => c?.bringForward())}
             />
             <Item
               icon={<ArrowDown size={15} />}
               label="Send backward"
+              shortcut="Ctrl+["
               onClick={run((c) => c?.sendBackward())}
             />
             <Item
               icon={<ArrowDownToLine size={15} />}
               label="Send to back"
+              shortcut="Ctrl+Shift+["
               onClick={run((c) => c?.sendToBack())}
             />
             <Sep />

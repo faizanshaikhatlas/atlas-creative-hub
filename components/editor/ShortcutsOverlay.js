@@ -25,6 +25,8 @@ const GROUPS = [
       ["Ungroup", ["Mod", "Shift", "G"]],
       ["Bring forward", ["Mod", "]"]],
       ["Send backward", ["Mod", "["]],
+      ["Bring to front", ["Mod", "Shift", "]"]],
+      ["Send to back", ["Mod", "Shift", "["]],
     ],
   },
   {

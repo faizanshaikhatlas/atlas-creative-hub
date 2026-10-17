@@ -1,20 +1,41 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, X, Loader2, Play, Pause, Repeat } from "lucide-react";
+import { ChevronLeft, ChevronRight, X, Loader2, Play, Pause, Repeat, RotateCcw } from "lucide-react";
 
 /**
- * Fullscreen presentation of all pages. Renders each page to an image via the
- * controller's offscreen renderer (so the live editor canvas is untouched),
- * caches results, and navigates with arrows/space/click. Esc or ✕ exits.
+ * Fullscreen presentation of all pages. Each page is rendered (off the live
+ * canvas) into a stack of full-size transparent layers — one per object — so
+ * objects with an entrance animation can fly in individually while z-order and
+ * alignment stay pixel-exact. Pages with no animated object come back as a
+ * single flattened layer. Navigate with arrows/space/click; Esc or ✕ exits.
  */
+
+const KEYFRAME = { fade: "dsFade", rise: "dsRise", pop: "dsPop", slide: "dsSlide" };
+
+function layerStyle(anim, animIndex, speed = 1) {
+  if (anim === "none") {
+    // Base + static objects: a gentle fade so slides don't pop harshly.
+    return { animation: `dsFade ${Math.round(300 * speed)}ms ease-out both` };
+  }
+  const name = KEYFRAME[anim] || "dsFade";
+  const delay = Math.round((150 + animIndex * 220) * speed);
+  const dur = Math.round(520 * speed);
+  return { animation: `${name} ${dur}ms cubic-bezier(.2,.7,.2,1) both`, animationDelay: `${delay}ms` };
+}
+
 export default function PresentMode({ pages, startIndex = 0, controllerRef, onClose }) {
   const [index, setIndex] = useState(startIndex);
-  const [urls, setUrls] = useState({});
+  const [layersByIndex, setLayersByIndex] = useState({});
   const [playing, setPlaying] = useState(false);
   const [intervalSec, setIntervalSec] = useState(5);
   const [loop, setLoop] = useState(false);
-  const [shown, setShown] = useState(true);
+  const [animSpeed, setAnimSpeed] = useState(1); // 0.6 fast · 1 normal · 1.6 slow
+  const [replayNonce, setReplayNonce] = useState(0);
+  const [vp, setVp] = useState(() => ({
+    w: typeof window !== "undefined" ? window.innerWidth : 1280,
+    h: typeof window !== "undefined" ? window.innerHeight : 720,
+  }));
   const cacheRef = useRef({});
   const overlayRef = useRef(null);
 
@@ -27,9 +48,9 @@ export default function PresentMode({ pages, startIndex = 0, controllerRef, onCl
       const fit = Math.min(window.innerWidth / pg.width, window.innerHeight / pg.height);
       const mult = Math.min(2, Math.max(0.5, fit * (window.devicePixelRatio || 1)));
       try {
-        const url = await c.renderPageJSON(pg.json, pg.width, pg.height, mult);
-        cacheRef.current[i] = url;
-        setUrls((u) => ({ ...u, [i]: url }));
+        const layers = await c.renderPageLayers(pg.json, pg.width, pg.height, mult);
+        cacheRef.current[i] = layers;
+        setLayersByIndex((m) => ({ ...m, [i]: layers }));
       } catch {
         /* a page that fails to render just shows the spinner */
       }
@@ -43,15 +64,6 @@ export default function PresentMode({ pages, startIndex = 0, controllerRef, onCl
     renderAt(index + 1);
     renderAt(index - 1);
   }, [index, renderAt]);
-
-  const url = urls[index];
-
-  // Fade each slide in when the page (or its rendered image) changes.
-  useEffect(() => {
-    setShown(false);
-    const raf = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(raf);
-  }, [index, url]);
 
   // Auto-advance (play). Stops at the end unless looping.
   useEffect(() => {
@@ -84,6 +96,13 @@ export default function PresentMode({ pages, startIndex = 0, controllerRef, onCl
     return () => window.removeEventListener("keydown", onKey);
   }, [next, prev, onClose, pages.length]);
 
+  // Track viewport so the slide (and its layers) keep the page aspect ratio.
+  useEffect(() => {
+    const onResize = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // Try true fullscreen; harmless if the browser blocks it.
   useEffect(() => {
     const el = overlayRef.current;
@@ -95,16 +114,47 @@ export default function PresentMode({ pages, startIndex = 0, controllerRef, onCl
     };
   }, []);
 
+  const pg = pages[index];
+  const layers = layersByIndex[index];
+  const pad = 32;
+  const scale = pg ? Math.min((vp.w - pad) / pg.width, (vp.h - pad) / pg.height) : 1;
+  const dispW = pg ? Math.max(1, Math.round(pg.width * scale)) : 1;
+  const dispH = pg ? Math.max(1, Math.round(pg.height * scale)) : 1;
+
+  // Assign a stagger order to each animated layer as we render them.
+  let animCount = 0;
+
   return (
     <div ref={overlayRef} className="fixed inset-0 z-[60] bg-black">
+      <style>{`
+        @keyframes dsFade { from { opacity: 0 } to { opacity: 1 } }
+        @keyframes dsRise { from { opacity: 0; transform: translateY(6%) } to { opacity: 1; transform: none } }
+        @keyframes dsPop { from { opacity: 0; transform: scale(.6) } to { opacity: 1; transform: none } }
+        @keyframes dsSlide { from { opacity: 0; transform: translateX(-8%) } to { opacity: 1; transform: none } }
+      `}</style>
+
       <div className="absolute inset-0 flex cursor-pointer items-center justify-center p-4" onClick={next}>
-        {url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={url}
-            alt={`Page ${index + 1}`}
-            className={`max-h-full max-w-full object-contain shadow-2xl transition-opacity duration-300 ${shown ? "opacity-100" : "opacity-0"}`}
-          />
+        {layers ? (
+          <div
+            key={`slide-${index}-${replayNonce}`}
+            className="relative shadow-2xl"
+            style={{ width: dispW, height: dispH }}
+          >
+            {layers.map((l, li) => {
+              const animIndex = l.anim !== "none" ? animCount++ : 0;
+              return (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={li}
+                  src={l.url}
+                  alt=""
+                  draggable={false}
+                  className="absolute inset-0 h-full w-full object-contain"
+                  style={layerStyle(l.anim, animIndex, animSpeed)}
+                />
+              );
+            })}
+          </div>
         ) : (
           <Loader2 size={30} className="animate-spin text-white/70" />
         )}
@@ -156,6 +206,27 @@ export default function PresentMode({ pages, startIndex = 0, controllerRef, onCl
         >
           <Repeat size={15} />
         </button>
+        <span className="mx-0.5 h-5 w-px bg-white/20" />
+        <button
+          type="button"
+          onClick={() => setReplayNonce((n) => n + 1)}
+          aria-label="Replay animations"
+          title="Replay animations"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full hover:bg-white/20"
+        >
+          <RotateCcw size={15} />
+        </button>
+        <select
+          value={animSpeed}
+          onChange={(e) => setAnimSpeed(Number(e.target.value))}
+          aria-label="Animation speed"
+          title="Animation speed"
+          className="rounded bg-white/10 px-1 py-0.5 text-xs text-white outline-none"
+        >
+          <option className="text-slate-800" value={0.6}>Fast</option>
+          <option className="text-slate-800" value={1}>Normal</option>
+          <option className="text-slate-800" value={1.6}>Slow</option>
+        </select>
       </div>
       <button
         type="button"
