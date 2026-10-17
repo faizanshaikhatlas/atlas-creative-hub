@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Rect, Circle, Triangle, Line, Polygon, Path } from "fabric";
+import { Rect, Circle, Triangle, Line, Polygon, Path, Ellipse } from "fabric";
 import {
   Square, Circle as CircleIcon, Triangle as TriangleIcon, Diamond, Pentagon, Hexagon,
   Star, Minus, ArrowRight, MoveHorizontal, ChevronRight, Plus, Heart, Check, MapPin,
   MessageSquare, ImagePlus, Trash2, Search, Loader2,
+  Octagon, RectangleHorizontal, ArrowUp, Sparkles, Award, Zap, Cloud, Play, X, Crown, Tag, Quote,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { saveUpload, listUploads, deleteUpload } from "@/lib/db/projects";
@@ -36,6 +37,15 @@ const HEART = "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c
 const CHECK = "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
 const PIN = "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z";
 const BUBBLE = "M20 2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4v4l5-4h7a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z";
+const PARALLELOGRAM = [{ x: 45, y: 0 }, { x: 200, y: 0 }, { x: 155, y: 120 }, { x: 0, y: 120 }];
+const TRAPEZOID = [{ x: 50, y: 0 }, { x: 150, y: 0 }, { x: 200, y: 120 }, { x: 0, y: 120 }];
+const SPARKLE = [{ x: 90, y: 0 }, { x: 108, y: 72 }, { x: 180, y: 90 }, { x: 108, y: 108 }, { x: 90, y: 180 }, { x: 72, y: 108 }, { x: 0, y: 90 }, { x: 72, y: 72 }];
+const CROWN = [{ x: 0, y: 130 }, { x: 22, y: 40 }, { x: 65, y: 85 }, { x: 100, y: 15 }, { x: 135, y: 85 }, { x: 178, y: 40 }, { x: 200, y: 130 }];
+const TAG = [{ x: 40, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 120 }, { x: 40, y: 120 }, { x: 0, y: 60 }];
+const LIGHTNING = "M13 2L4 14h6l-1 8 9-12h-6z";
+const CLOUD = "M6 19a5 5 0 0 1-.5-9.98A7 7 0 0 1 19 8.5a4.5 4.5 0 0 1-.5 9z";
+const QUOTE = "M7 7H4a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h3l-2 4h3l2-4V8a1 1 0 0 0-1-1zm9 0h-3a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h3l-2 4h3l2-4V8a1 1 0 0 0-1-1z";
+const HALFCIRCLE = "M0 100 A100 100 0 0 1 200 100 Z";
 
 function makePath(d, { fill = FILL, name = "Icon" } = {}) {
   const p = new Path(d, { fill, name });
@@ -63,8 +73,29 @@ const ELEMENTS = [
   { id: "check", label: "Check", cat: "Icons", Icon: Check, make: () => makePath(CHECK, { fill: "#22c55e", name: "Check" }) },
   { id: "pin", label: "Location", cat: "Icons", Icon: MapPin, make: () => makePath(PIN, { fill: FILL, name: "Location pin" }) },
   { id: "bubble", label: "Speech", cat: "Icons", Icon: MessageSquare, make: () => makePath(BUBBLE, { fill: FILL, name: "Speech bubble" }) },
+  // Expanded shapes
+  { id: "square", label: "Square", cat: "Shapes", Icon: Square, make: () => new Rect({ width: 160, height: 160, fill: FILL, name: "Square" }) },
+  { id: "ellipse", label: "Ellipse", cat: "Shapes", Icon: CircleIcon, make: () => new Ellipse({ rx: 110, ry: 70, fill: FILL, name: "Ellipse" }) },
+  { id: "octagon", label: "Octagon", cat: "Shapes", Icon: Octagon, make: () => new Polygon(regularPts(8, 90), { fill: FILL, name: "Octagon" }) },
+  { id: "parallelogram", label: "Slant", cat: "Shapes", Icon: RectangleHorizontal, make: () => new Polygon(PARALLELOGRAM, { fill: FILL, name: "Parallelogram" }) },
+  { id: "trapezoid", label: "Trapezoid", cat: "Shapes", Icon: RectangleHorizontal, make: () => new Polygon(TRAPEZOID, { fill: FILL, name: "Trapezoid" }) },
+  { id: "halfcircle", label: "Half", cat: "Shapes", Icon: CircleIcon, make: () => makePath(HALFCIRCLE, { fill: FILL, name: "Half circle" }) },
+  // Expanded lines & arrows
+  { id: "dashed", label: "Dashed", cat: "Lines & arrows", Icon: Minus, make: () => new Line([0, 0, 220, 0], { stroke: STROKE, strokeWidth: 6, strokeDashArray: [20, 14], strokeLineCap: "round", name: "Dashed line" }) },
+  { id: "arrow-up", label: "Arrow up", cat: "Lines & arrows", Icon: ArrowUp, make: () => new Polygon(ARROW, { fill: FILL, angle: -90, name: "Arrow up" }) },
+  // Stickers
+  { id: "sparkle", label: "Sparkle", cat: "Stickers", Icon: Sparkles, make: () => new Polygon(SPARKLE, { fill: "#fde047", name: "Sparkle" }) },
+  { id: "seal", label: "Seal", cat: "Stickers", Icon: Award, make: () => new Polygon(starPts(12, 95, 74), { fill: "#ef4444", name: "Seal" }) },
+  { id: "lightning", label: "Bolt", cat: "Stickers", Icon: Zap, make: () => makePath(LIGHTNING, { fill: "#f59e0b", name: "Lightning" }) },
+  { id: "cloud", label: "Cloud", cat: "Stickers", Icon: Cloud, make: () => makePath(CLOUD, { fill: "#93c5fd", name: "Cloud" }) },
+  { id: "play", label: "Play", cat: "Stickers", Icon: Play, make: () => new Triangle({ width: 160, height: 170, angle: 90, fill: FILL, name: "Play" }) },
+  { id: "cross", label: "Cross", cat: "Stickers", Icon: X, make: () => new Polygon(PLUS, { angle: 45, fill: "#ef4444", name: "Cross" }) },
+  { id: "crown", label: "Crown", cat: "Stickers", Icon: Crown, make: () => new Polygon(CROWN, { fill: "#f59e0b", name: "Crown" }) },
+  { id: "tag", label: "Tag", cat: "Stickers", Icon: Tag, make: () => new Polygon(TAG, { fill: FILL, name: "Tag" }) },
+  { id: "quote", label: "Quote", cat: "Stickers", Icon: Quote, make: () => makePath(QUOTE, { fill: "#0f172a", name: "Quote" }) },
+  { id: "ring", label: "Ring", cat: "Stickers", Icon: CircleIcon, make: () => new Circle({ radius: 85, fill: "", stroke: STROKE, strokeWidth: 14, name: "Ring" }) },
 ];
-const CATEGORIES = ["Shapes", "Lines & arrows", "Icons"];
+const CATEGORIES = ["Shapes", "Lines & arrows", "Icons", "Stickers"];
 
 /** Read a file to a data URL, downscaling very large images for performance/storage. */
 async function fileToDataUrl(file, maxDim = 2000) {

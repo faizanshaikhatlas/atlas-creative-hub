@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy } from "lucide-react";
+import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Tag } from "lucide-react";
 import {
   listProjects,
   createProject,
   deleteProject,
   duplicateProject,
   renameProject,
+  setProjectTags,
   SIZE_PRESETS,
 } from "@/lib/db/projects";
 import { THEMES } from "@/lib/template-catalog/formats";
@@ -46,6 +47,7 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
   const [designQuery, setDesignQuery] = useState("");
   const [sortBy, setSortBy] = useState("recent"); // "recent" | "name"
+  const [tagFilter, setTagFilter] = useState("all");
   const [error, setError] = useState(null);
 
   async function refresh() {
@@ -87,6 +89,11 @@ export default function HomePage() {
   async function handleRename(id, name) {
     try { await renameProject(id, name); refresh(); }
     catch (err) { console.error(err); setError("Could not rename the design."); }
+  }
+
+  async function handleSetTags(id, tags) {
+    try { await setProjectTags(id, tags); refresh(); }
+    catch (err) { console.error(err); setError("Could not update tags."); }
   }
 
   function submitSearch(e) {
@@ -224,6 +231,19 @@ export default function HomePage() {
             )}
           </div>
 
+          {projects && projects.length > 0 && (() => {
+            const allTags = [...new Set(projects.flatMap((p) => p.tags || []))].sort((a, b) => a.localeCompare(b));
+            if (!allTags.length) return null;
+            return (
+              <div className="ds-scroll mb-4 flex gap-2 overflow-x-auto pb-1">
+                <HomeChip active={tagFilter === "all"} onClick={() => setTagFilter("all")}>All</HomeChip>
+                {allTags.map((t) => (
+                  <HomeChip key={t} active={tagFilter === t} onClick={() => setTagFilter(t)}>#{t}</HomeChip>
+                ))}
+              </div>
+            );
+          })()}
+
           {projects === null ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -241,13 +261,14 @@ export default function HomePage() {
             const q = designQuery.trim().toLowerCase();
             const visible = projects
               .filter((p) => !q || (p.name || "").toLowerCase().includes(q))
+              .filter((p) => tagFilter === "all" || (p.tags || []).includes(tagFilter))
               .sort((a, b) =>
                 sortBy === "name"
                   ? (a.name || "").localeCompare(b.name || "")
                   : (b.updatedAt || 0) - (a.updatedAt || 0)
               );
             if (visible.length === 0) {
-              return <p className="py-10 text-center text-sm text-slate-400">No designs match “{designQuery}”.</p>;
+              return <p className="py-10 text-center text-sm text-slate-400">No designs match your search or tag filter.</p>;
             }
             return (
               <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -259,6 +280,7 @@ export default function HomePage() {
                       onRename={handleRename}
                       onDuplicate={handleDuplicate}
                       onDelete={handleDelete}
+                      onSetTags={handleSetTags}
                     />
                   </li>
                 ))}
@@ -273,10 +295,12 @@ export default function HomePage() {
   );
 }
 
-function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
+function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete, onSetTags }) {
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(p.name || "");
+  const [editingTags, setEditingTags] = useState(false);
+  const [tagsValue, setTagsValue] = useState("");
   const [busy, setBusy] = useState(false);
   const menuRef = useRef(null);
 
@@ -298,6 +322,16 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
     setMenu(false);
     setBusy(true);
     try { await onDuplicate(p.id); } finally { setBusy(false); }
+  }
+  function startTags() {
+    setMenu(false);
+    setTagsValue((p.tags || []).join(", "));
+    setEditingTags(true);
+  }
+  async function commitTags() {
+    setEditingTags(false);
+    const parsed = tagsValue.split(",").map((t) => t.trim()).filter(Boolean);
+    await onSetTags?.(p.id, parsed);
   }
 
   return (
@@ -334,6 +368,29 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
             </p>
           )}
           <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)} · {p.width}×{p.height}</p>
+          {editingTags ? (
+            <input
+              autoFocus
+              value={tagsValue}
+              onChange={(e) => setTagsValue(e.target.value)}
+              onBlur={commitTags}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitTags();
+                if (e.key === "Escape") setEditingTags(false);
+              }}
+              placeholder="tags, comma, separated"
+              className="mt-1 w-full rounded border border-brand-400 px-1.5 py-0.5 text-[11px] text-slate-700 outline-none"
+            />
+          ) : (
+            (p.tags || []).length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-1">
+                {(p.tags || []).slice(0, 3).map((t) => (
+                  <span key={t} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">#{t}</span>
+                ))}
+                {(p.tags || []).length > 3 && <span className="text-[10px] text-slate-400">+{(p.tags || []).length - 3}</span>}
+              </div>
+            )
+          )}
         </div>
         <div className="relative" ref={menuRef}>
           <button
@@ -352,6 +409,9 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
               <button type="button" onClick={duplicate} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
                 <Copy size={14} /> Duplicate
               </button>
+              <button type="button" onClick={startTags} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                <Tag size={14} /> Edit tags
+              </button>
               <button type="button" onClick={() => { setMenu(false); onDelete(p.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50">
                 <Trash2 size={14} /> Delete
               </button>
@@ -365,5 +425,20 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
         </div>
       )}
     </div>
+  );
+}
+
+function HomeChip({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        "inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-xs font-medium transition " +
+        (active ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300")
+      }
+    >
+      {children}
+    </button>
   );
 }
