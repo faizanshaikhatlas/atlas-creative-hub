@@ -2,23 +2,35 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Film, Loader2, ImageOff, LayoutTemplate } from "lucide-react";
+import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight } from "lucide-react";
 import {
   listProjects,
   createProject,
   deleteProject,
   SIZE_PRESETS,
 } from "@/lib/db/projects";
+import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
-import CloudMenu from "@/components/auth/CloudMenu";
+
+// Representative photo per theme for the browse tiles (already in /public).
+const THEME_PHOTO = {
+  luxury: "/template-photos/lux-watch.jpg",
+  minimal: "/template-photos/min-art.jpg",
+  youtube: "/template-photos/yt-portrait.jpg",
+  corporate: "/template-photos/corp-audience.jpg",
+  education: "/template-photos/edu-students.jpg",
+  nature: "/template-photos/nat-botanical.jpg",
+  food: "/template-photos/food-dish.jpg",
+  tech: "/template-photos/tech-device.jpg",
+};
+
+// Popular quick-create formats (ids map to SIZE_PRESETS).
+const POPULAR = ["youtube-thumbnail", "instagram-post", "instagram-story", "presentation", "facebook-post", "youtube-banner"];
 
 function formatDate(ts) {
   if (!ts) return "";
   try {
-    return new Date(ts).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
+    return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   } catch {
     return "";
   }
@@ -29,188 +41,198 @@ export default function HomePage() {
   const [projects, setProjects] = useState(null); // null = loading
   const [creating, setCreating] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [query, setQuery] = useState("");
   const [error, setError] = useState(null);
 
   async function refresh() {
     try {
-      const list = await listProjects();
-      setProjects(list);
+      setProjects(await listProjects());
     } catch (err) {
       console.error(err);
-      setError(
-        "Local storage (IndexedDB) is unavailable in this browser. Projects cannot be saved."
-      );
+      setError("Local storage (IndexedDB) is unavailable in this browser. Designs cannot be saved.");
       setProjects([]);
     }
   }
+  useEffect(() => { refresh(); }, []);
 
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  async function handleCreate({ type, width, height } = {}) {
+  async function quickCreate({ type, width, height } = {}) {
     setShowNew(false);
     setCreating(true);
     setError(null);
     try {
-      const project = await createProject({
-        name: "Untitled design",
-        type: type || "youtube-thumbnail",
-        width,
-        height,
-      });
+      const project = await createProject({ name: "Untitled design", type: type || "youtube-thumbnail", width, height });
       router.push(`/editor/${project.id}`);
     } catch (err) {
       console.error(err);
       setCreating(false);
-      setError("Could not create a new project.");
+      setError("Could not create a new design.");
     }
   }
 
   async function handleDelete(e, id) {
     e.stopPropagation();
-    if (!window.confirm("Delete this project? This cannot be undone.")) return;
-    try {
-      await deleteProject(id);
-      refresh();
-    } catch (err) {
-      console.error(err);
-      setError("Could not delete the project.");
-    }
+    if (!window.confirm("Delete this design? This cannot be undone.")) return;
+    try { await deleteProject(id); refresh(); }
+    catch (err) { console.error(err); setError("Could not delete the design."); }
   }
 
-  const preset = SIZE_PRESETS[0];
+  function submitSearch(e) {
+    e.preventDefault();
+    const q = query.trim();
+    router.push(q ? `/templates?q=${encodeURIComponent(q)}` : "/templates");
+  }
 
   return (
-    <div className="mx-auto min-h-dvh max-w-6xl px-4 py-8 sm:px-6 sm:py-12">
-      <header className="mb-8 flex flex-col gap-4 sm:mb-10 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          {/* Official ATLAS Creative Hub logo (dark wordmark on light surface) */}
+    <div className="min-h-dvh bg-slate-50">
+      {/* Top bar */}
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/brand/atlas-logo.svg"
-            alt="ATLAS Creative Hub"
-            width={252}
-            height={49}
-            className="h-10 w-auto sm:h-11"
-          />
-          <p className="mt-2 text-sm text-slate-500">
-            Create and edit thumbnails, banners and social posts in your browser.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <CloudMenu onSynced={refresh} />
-          <button
-            type="button"
-            onClick={() => router.push("/templates")}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-brand-400 hover:text-brand-700"
-          >
-            <LayoutTemplate size={18} />
-            Templates
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowNew(true)}
-            disabled={creating}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60"
-          >
-            {creating ? (
-              <Loader2 size={18} className="animate-spin" />
-            ) : (
-              <Plus size={18} />
-            )}
-            New design
-          </button>
+          <img src="/brand/atlas-logo.svg" alt="ATLAS Creative Hub" width={200} height={39} className="h-8 w-auto sm:h-9" />
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => router.push("/templates")}
+              className="hidden rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:text-brand-700 sm:inline-flex">
+              Templates
+            </button>
+            <button type="button" onClick={() => setShowNew(true)} disabled={creating}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60">
+              {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create a design
+            </button>
+          </div>
         </div>
       </header>
 
-      {error && (
-        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          {error}
-        </div>
-      )}
+      <main className="mx-auto max-w-[1400px] px-4 pb-20 sm:px-6">
+        {/* Hero + search */}
+        <section className="py-10 text-center sm:py-14">
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+            What will you design today?
+          </h1>
+          <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
+            Start from a template or a blank canvas. Everything is saved on this device — no sign-in needed.
+          </p>
+          <form onSubmit={submitSearch} className="mx-auto mt-6 flex max-w-xl items-center">
+            <div className="relative flex-1">
+              <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search templates — “sale”, “launch”, “menu”, “admissions”…"
+                className="w-full rounded-l-xl border border-r-0 border-slate-200 bg-white py-3 pl-11 pr-3 text-sm outline-none focus:border-brand-400"
+                aria-label="Search templates"
+              />
+            </div>
+            <button type="submit" className="rounded-r-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-brand-700">
+              Search
+            </button>
+          </form>
+        </section>
 
-      {projects === null ? (
-        <div className="flex items-center gap-2 py-20 text-slate-400">
-          <Loader2 size={18} className="animate-spin" /> Loading projects…
-        </div>
-      ) : projects.length === 0 ? (
-        <button
-          type="button"
-          onClick={() => setShowNew(true)}
-          disabled={creating}
-          className="flex w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white/50 py-20 text-slate-400 transition hover:border-brand-400 hover:text-brand-600"
-        >
-          <Film size={36} />
-          <span className="text-sm font-medium">
-            No projects yet — create your first design
-          </span>
-          <span className="text-xs">
-            {preset.width} × {preset.height} px
-          </span>
-        </button>
-      ) : (
-        <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((p) => (
-            <li key={p.id}>
-              <button
-                type="button"
-                onClick={() => router.push(`/editor/${p.id}`)}
-                className="group flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:border-brand-400 hover:shadow-md"
-              >
-                <div className="relative aspect-video w-full overflow-hidden bg-slate-100">
-                  {p.thumbnail ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={p.thumbnail}
-                      alt={p.name}
-                      className="h-full w-full object-contain"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-slate-300">
-                      <ImageOff size={28} />
-                    </div>
-                  )}
-                  <span
-                    onClick={(e) => handleDelete(e, p.id)}
-                    role="button"
-                    aria-label="Delete project"
-                    className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-slate-500 opacity-0 shadow-sm transition hover:text-rose-600 group-hover:opacity-100"
-                  >
-                    <Trash2 size={16} />
+        {error && (
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{error}</div>
+        )}
+
+        {/* Create a design — popular formats */}
+        <section className="mb-12">
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Create a design</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {POPULAR.map((id) => {
+              const p = SIZE_PRESETS.find((s) => s.id === id);
+              if (!p) return null;
+              const landscape = p.width >= p.height;
+              return (
+                <button key={id} type="button" onClick={() => quickCreate({ type: id })}
+                  className="group flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-center transition hover:border-brand-400 hover:shadow-sm">
+                  <span className="flex h-16 w-full items-center justify-center">
+                    <span className="rounded-md bg-gradient-to-br from-brand-100 to-brand-200 ring-1 ring-brand-300/50"
+                      style={{ width: landscape ? 56 : 36, height: landscape ? 32 : 52 }} />
                   </span>
-                </div>
-                <div className="flex items-center justify-between gap-2 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-800">
-                      {p.name || "Untitled"}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      Edited {formatDate(p.updatedAt)}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-1">
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                      {p.width}×{p.height}
-                    </span>
-                    {p.pages?.length > 1 && (
-                      <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700">
-                        {p.pages.length} pages
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+                  <span className="text-xs font-medium text-slate-700">{p.label}</span>
+                  <span className="text-[10px] text-slate-400">{p.width}×{p.height}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
-      <NewDesignDialog
-        open={showNew}
-        onClose={() => setShowNew(false)}
-        onCreate={handleCreate}
-      />
+        {/* Browse by theme */}
+        <section className="mb-12">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">Browse by theme</h2>
+            <button onClick={() => router.push("/templates")} className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline">
+              All templates <ArrowRight size={15} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {THEMES.map((t) => (
+              <button key={t.id} type="button" onClick={() => router.push(`/templates?theme=${t.id}`)}
+                className="group relative aspect-[4/3] overflow-hidden rounded-2xl border border-slate-200 text-left shadow-sm transition hover:shadow-md"
+                style={{ background: `linear-gradient(135deg, ${t.swatch[0]}, ${t.swatch[1]})` }}>
+                {THEME_PHOTO[t.id] && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={THEME_PHOTO[t.id]} alt="" loading="lazy"
+                    className="absolute inset-0 h-full w-full object-cover opacity-55 transition group-hover:opacity-70 group-hover:scale-105" />
+                )}
+                <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                <span className="absolute inset-x-0 bottom-0 p-3">
+                  <span className="block text-sm font-semibold leading-tight text-white drop-shadow">{t.name}</span>
+                  <span className="mt-0.5 block text-[11px] text-white/80">{t.tagline}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Recent designs */}
+        <section>
+          <h2 className="mb-4 text-lg font-semibold text-slate-900">Your recent designs</h2>
+          {projects === null ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="aspect-video animate-pulse rounded-2xl bg-slate-200" />
+              ))}
+            </div>
+          ) : projects.length === 0 ? (
+            <button type="button" onClick={() => setShowNew(true)}
+              className="flex w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 py-16 text-slate-400 transition hover:border-brand-400 hover:text-brand-600">
+              <Sparkles size={30} />
+              <span className="text-sm font-medium">No designs yet — create your first one</span>
+              <span className="text-xs">Pick a template or a blank format above</span>
+            </button>
+          ) : (
+            <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {projects.map((p) => (
+                <li key={p.id}>
+                  <button type="button" onClick={() => router.push(`/editor/${p.id}`)}
+                    className="group flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:border-brand-400 hover:shadow-md">
+                    <div className="relative aspect-video w-full overflow-hidden bg-slate-100">
+                      {p.thumbnail ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={p.thumbnail} alt={p.name} className="h-full w-full object-contain" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-slate-300"><ImageOff size={26} /></div>
+                      )}
+                      <span onClick={(e) => handleDelete(e, p.id)} role="button" aria-label="Delete design"
+                        className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-slate-500 opacity-0 shadow-sm transition hover:text-rose-600 group-hover:opacity-100">
+                        <Trash2 size={15} />
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-800">{p.name || "Untitled"}</p>
+                        <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)}</p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{p.width}×{p.height}</span>
+                    </div>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </main>
+
+      <NewDesignDialog open={showNew} onClose={() => setShowNew(false)} onCreate={quickCreate} />
     </div>
   );
 }
