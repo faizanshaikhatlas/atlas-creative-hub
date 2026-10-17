@@ -228,8 +228,11 @@ function NewKitForm({ onSaved }) {
         logos: logo ? [logo] : [],
       });
       onSaved?.(kit.id);
-    } catch {
-      setError("Could not save the brand kit (storage error).");
+    } catch (err) {
+      // Surface the real Dexie/IndexedDB exception instead of a generic message.
+      console.error("Brand kit save failed:", err);
+      const detail = err?.name && err?.message ? `${err.name}: ${err.message}` : String(err?.message || err?.name || err);
+      setError(`Could not save the brand kit — ${detail}`);
       setBusy(false);
     }
   }

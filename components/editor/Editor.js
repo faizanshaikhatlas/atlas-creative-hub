@@ -23,6 +23,7 @@ import TemplatesPanel from "@/components/editor/TemplatesPanel";
 import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
 import PagesBar from "@/components/editor/PagesBar";
+import ExportDialog from "@/components/editor/ExportDialog";
 
 function newPageId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -37,6 +38,7 @@ export default function Editor({ project }) {
   const [toast, setToast] = useState(null);
   const [leftTab, setLeftTab] = useState("elements");
   const [menu, setMenu] = useState(null);
+  const [showExport, setShowExport] = useState(false);
 
   // Multi-page document state. `pagesRef` mirrors it so the autosave callback
   // and page operations always read the latest without stale closures.
@@ -412,7 +414,7 @@ export default function Editor({ project }) {
     if (revoke) setTimeout(() => URL.revokeObjectURL(href), 1000);
   }
 
-  async function exportAllPagesPDF(base) {
+  async function exportAllPagesPDF(base, scale = 1) {
     const c = controllerRef.current;
     const { jsPDF } = await import("jspdf");
     const { pages: cur, activePageId: act } = pagesRef.current;
@@ -420,15 +422,10 @@ export default function Editor({ project }) {
     let pdf = null;
     for (let i = 0; i < captured.length; i++) {
       const pg = captured[i];
-      const dataURL = await c.renderPageJSON(pg.json, pg.width, pg.height, 1);
+      const dataURL = await c.renderPageJSON(pg.json, pg.width, pg.height, scale);
       const orientation = pg.width >= pg.height ? "l" : "p";
       if (i === 0) {
-        pdf = new jsPDF({
-          orientation,
-          unit: "px",
-          format: [pg.width, pg.height],
-          hotfixes: ["px_scaling"],
-        });
+        pdf = new jsPDF({ orientation, unit: "px", format: [pg.width, pg.height], hotfixes: ["px_scaling"] });
       } else {
         pdf.addPage([pg.width, pg.height], orientation);
       }
@@ -437,33 +434,49 @@ export default function Editor({ project }) {
     pdf.save(`${base}.pdf`);
   }
 
-  async function handleExport(format = "png") {
+  // Driven by the ExportDialog. Throws on failure so the dialog can show it.
+  async function handleExport(opts = {}) {
     const c = controllerRef.current;
-    if (!c) return;
+    if (!c) throw new Error("Canvas is not ready.");
     const base = safeBase();
-    try {
-      if (format === "svg") {
-        const svg = c.exportSVG();
-        const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-        triggerDownload(url, `${base}.svg`, true);
-      } else if (format === "pdf") {
-        await exportAllPagesPDF(base);
-      } else {
-        const pageIdx = pagesRef.current.pages.findIndex(
-          (p) => p.id === pagesRef.current.activePageId
-        );
-        const suffix =
-          pagesRef.current.pages.length > 1 ? `-page-${pageIdx + 1}` : "";
-        if (format === "jpg") {
-          triggerDownload(c.exportJPG(0.92), `${base}${suffix}.jpg`);
-        } else {
-          triggerDownload(c.exportPNG(), `${base}${suffix}.png`);
-        }
-      }
-    } catch (err) {
-      console.error("Export failed:", err);
-      showToast("Could not export the design.");
+    const { format = "png", scale = 1, transparent = false, pages = "current", quality = 0.92 } = opts;
+
+    if (format === "svg") {
+      const svg = c.exportSVG();
+      const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+      triggerDownload(url, `${base}.svg`, true);
+      return;
     }
+    if (format === "pdf") {
+      await exportAllPagesPDF(base, scale);
+      return;
+    }
+
+    const ext = format === "jpg" ? "jpg" : "png";
+    // All pages → one raster file per page.
+    if (pages === "all" && pagesRef.current.pages.length > 1) {
+      const captured = captureActive(pagesRef.current.pages, pagesRef.current.activePageId);
+      for (let i = 0; i < captured.length; i++) {
+        const pg = captured[i];
+        const dataURL = await c.renderPageJSON(pg.json, pg.width, pg.height, scale, {
+          transparent: format === "png" && transparent,
+          format: format === "jpg" ? "jpeg" : "png",
+          quality,
+        });
+        triggerDownload(dataURL, `${base}-page-${i + 1}.${ext}`);
+        await new Promise((r) => setTimeout(r, 150)); // let the browser accept multiple downloads
+      }
+      return;
+    }
+
+    // Current page.
+    const pageIdx = pagesRef.current.pages.findIndex((p) => p.id === pagesRef.current.activePageId);
+    const suffix = pagesRef.current.pages.length > 1 ? `-page-${pageIdx + 1}` : "";
+    const url =
+      format === "jpg"
+        ? c.exportJPG({ quality, multiplier: scale })
+        : c.exportPNG({ multiplier: scale, transparent });
+    triggerDownload(url, `${base}${suffix}.${ext}`);
   }
 
   async function handleBack() {
@@ -495,7 +508,7 @@ export default function Editor({ project }) {
       <Toolbar
         controllerRef={controllerRef}
         onBack={handleBack}
-        onExport={handleExport}
+        onExport={() => setShowExport(true)}
         onSave={doSave}
         onFit={() => fitRef.current?.()}
       />
@@ -658,6 +671,15 @@ export default function Editor({ project }) {
         controllerRef={controllerRef}
         onClose={() => setMenu(null)}
       />
+
+      {showExport && (
+        <ExportDialog
+          pageCount={pages.length}
+          pageSize={pages.find((p) => p.id === activePageId) || pages[0] || { width: 0, height: 0 }}
+          onClose={() => setShowExport(false)}
+          onExport={handleExport}
+        />
+      )}
 
       {toast && (
         <div className="fixed bottom-20 left-1/2 z-30 -translate-x-1/2 rounded-lg bg-slate-900 px-4 py-2 text-sm text-white shadow-lg md:bottom-6">

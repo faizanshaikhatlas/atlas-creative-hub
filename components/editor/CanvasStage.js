@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import { CanvasController } from "@/lib/fabric/canvasController";
 import { useEditorStore } from "@/lib/store/editorStore";
+import Rulers, { RULER } from "@/components/editor/Rulers";
 
 /**
  * Mounts the Fabric canvas and connects it to the store. The CanvasController
@@ -21,6 +22,9 @@ export default function CanvasStage({
 }) {
   const canvasElRef = useRef(null);
   const workspaceRef = useRef(null);
+  const outerRef = useRef(null);
+  const artboardRef = useRef(null);
+  const showRulers = useEditorStore((s) => s.showRulers);
   // Keep the latest context-menu callback reachable from the controller, which
   // is created once on mount.
   const onContextMenuRef = useRef(onContextMenu);
@@ -109,15 +113,21 @@ export default function CanvasStage({
   }
 
   return (
-    <div
-      ref={workspaceRef}
-      onWheel={handleWheel}
-      className="ds-scroll relative flex h-full w-full items-center justify-center overflow-auto bg-slate-200 p-4 sm:p-8"
-    >
-      {/* Shadowed artboard frame; the <canvas> element sits inside. */}
-      <div className="shrink-0 shadow-2xl ring-1 ring-black/10">
-        <canvas ref={canvasElRef} />
+    <div ref={outerRef} className="relative h-full w-full overflow-hidden bg-slate-200">
+      <div
+        ref={workspaceRef}
+        onWheel={handleWheel}
+        className="ds-scroll absolute inset-0 flex items-center justify-center overflow-auto p-4 sm:p-8"
+        style={showRulers ? { top: RULER, left: RULER } : undefined}
+      >
+        {/* Shadowed artboard frame; the <canvas> element sits inside. */}
+        <div ref={artboardRef} className="shrink-0 shadow-2xl ring-1 ring-black/10">
+          <canvas ref={canvasElRef} />
+        </div>
       </div>
+      {showRulers && (
+        <Rulers outerRef={outerRef} artboardRef={artboardRef} workspaceRef={workspaceRef} />
+      )}
     </div>
   );
 }

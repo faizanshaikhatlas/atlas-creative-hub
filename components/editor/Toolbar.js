@@ -9,9 +9,10 @@ import {
   ZoomOut,
   Maximize,
   Download,
-  ChevronDown,
   Check,
   Loader2,
+  Ruler,
+  Magnet,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 
@@ -39,24 +40,29 @@ export default function Toolbar({ controllerRef, onBack, onExport, onSave, onFit
   const isSaving = useEditorStore((s) => s.isSaving);
   const isDirty = useEditorStore((s) => s.isDirty);
   const canvasReady = useEditorStore((s) => s.canvasReady);
+  const snapEnabled = useEditorStore((s) => s.snapEnabled);
+  const setSnapEnabled = useEditorStore((s) => s.setSnapEnabled);
+  const showRulers = useEditorStore((s) => s.showRulers);
+  const setShowRulers = useEditorStore((s) => s.setShowRulers);
 
   const c = () => controllerRef.current;
 
-  const [exportOpen, setExportOpen] = useState(false);
-  const exportRef = useRef(null);
+  const [viewOpen, setViewOpen] = useState(false);
+  const viewRef = useRef(null);
   useEffect(() => {
+    if (!viewOpen) return;
     function onDown(e) {
-      if (exportRef.current && !exportRef.current.contains(e.target)) {
-        setExportOpen(false);
-      }
+      if (viewRef.current && !viewRef.current.contains(e.target)) setViewOpen(false);
     }
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, []);
-  const pick = (fmt) => {
-    setExportOpen(false);
-    onExport(fmt);
-  };
+  }, [viewOpen]);
+
+  function toggleSnap() {
+    const next = !snapEnabled;
+    setSnapEnabled(next);
+    controllerRef.current?.setSnapEnabled(next);
+  }
 
   return (
     <header className="flex h-14 items-center gap-1 border-b border-slate-200 bg-white px-2 sm:gap-2 sm:px-4">
@@ -130,52 +136,43 @@ export default function Toolbar({ controllerRef, onBack, onExport, onSave, onFit
           </IconButton>
         </div>
 
-        <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />
-
-        <div className="relative" ref={exportRef}>
-          <button
-            type="button"
-            onClick={() => setExportOpen((v) => !v)}
-            disabled={!canvasReady}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Download size={16} />
-            <span className="hidden sm:inline">Export</span>
-            <ChevronDown size={14} />
-          </button>
-          {exportOpen && (
-            <div className="absolute right-0 top-full z-30 mt-1 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+        <div className="relative" ref={viewRef}>
+          <IconButton title="View options (rulers, snapping)" onClick={() => setViewOpen((v) => !v)}>
+            <Ruler size={18} />
+          </IconButton>
+          {viewOpen && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
               <button
                 type="button"
-                onClick={() => pick("png")}
-                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                onClick={() => setShowRulers(!showRulers)}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
               >
-                PNG <span className="text-slate-400">· this page</span>
+                <span className="inline-flex items-center gap-2"><Ruler size={15} /> Rulers</span>
+                <span className={`text-xs font-medium ${showRulers ? "text-brand-600" : "text-slate-400"}`}>{showRulers ? "On" : "Off"}</span>
               </button>
               <button
                 type="button"
-                onClick={() => pick("jpg")}
-                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                onClick={toggleSnap}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
               >
-                JPG <span className="text-slate-400">· this page</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => pick("svg")}
-                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-              >
-                SVG <span className="text-slate-400">· this page</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => pick("pdf")}
-                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-              >
-                PDF <span className="text-slate-400">· all pages</span>
+                <span className="inline-flex items-center gap-2"><Magnet size={15} /> Snap to guides</span>
+                <span className={`text-xs font-medium ${snapEnabled ? "text-brand-600" : "text-slate-400"}`}>{snapEnabled ? "On" : "Off"}</span>
               </button>
             </div>
           )}
         </div>
+
+        <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />
+
+        <button
+          type="button"
+          onClick={() => onExport()}
+          disabled={!canvasReady}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Download size={16} />
+          <span className="hidden sm:inline">Export</span>
+        </button>
       </div>
     </header>
   );

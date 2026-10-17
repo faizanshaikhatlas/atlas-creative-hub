@@ -648,19 +648,37 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
               value={sel.saturation}
               onChange={(v) => c()?.setImageAdjustments({ saturation: v })}
             />
-            <div className="flex items-center justify-between pt-1">
-              <span className="text-sm text-slate-600">Grayscale</span>
-              <Toggle
-                title="Toggle grayscale"
-                active={!!sel.grayscale}
-                onClick={() =>
-                  c()?.setImageAdjustments({ grayscale: !sel.grayscale })
-                }
-              >
-                <span className="text-xs font-medium">
-                  {sel.grayscale ? "On" : "Off"}
-                </span>
-              </Toggle>
+            {/* Blur: stored 0–0.4 on the filter; shown as 0–100. */}
+            <div>
+              <div className="flex justify-between text-[11px] text-slate-500">
+                <span>Blur</span>
+                <span className="tabular-nums">{Math.round(((sel.blur ?? 0) / 0.4) * 100)}</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round(((sel.blur ?? 0) / 0.4) * 100)}
+                onChange={(e) => c()?.setImageAdjustments({ blur: (Number(e.target.value) / 100) * 0.4 })}
+                className="w-full accent-brand-600"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-1.5 pt-1">
+              {[
+                ["grayscale", "B & W"],
+                ["sepia", "Sepia"],
+                ["invert", "Invert"],
+                ["duotone", "Duotone"],
+              ].map(([key, label]) => (
+                <Toggle
+                  key={key}
+                  title={`Toggle ${label}`}
+                  active={!!sel[key]}
+                  onClick={() => c()?.setImageAdjustments({ [key]: !sel[key] })}
+                >
+                  <span className="text-xs font-medium">{label}</span>
+                </Toggle>
+              ))}
             </div>
           </div>
         </>

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight } from "lucide-react";
+import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy } from "lucide-react";
 import {
   listProjects,
   createProject,
   deleteProject,
+  duplicateProject,
+  renameProject,
   SIZE_PRESETS,
 } from "@/lib/db/projects";
 import { THEMES } from "@/lib/template-catalog/formats";
@@ -42,6 +44,8 @@ export default function HomePage() {
   const [creating, setCreating] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [query, setQuery] = useState("");
+  const [designQuery, setDesignQuery] = useState("");
+  const [sortBy, setSortBy] = useState("recent"); // "recent" | "name"
   const [error, setError] = useState(null);
 
   async function refresh() {
@@ -69,11 +73,20 @@ export default function HomePage() {
     }
   }
 
-  async function handleDelete(e, id) {
-    e.stopPropagation();
+  async function handleDelete(id) {
     if (!window.confirm("Delete this design? This cannot be undone.")) return;
     try { await deleteProject(id); refresh(); }
     catch (err) { console.error(err); setError("Could not delete the design."); }
+  }
+
+  async function handleDuplicate(id) {
+    try { await duplicateProject(id); refresh(); }
+    catch (err) { console.error(err); setError("Could not duplicate the design."); }
+  }
+
+  async function handleRename(id, name) {
+    try { await renameProject(id, name); refresh(); }
+    catch (err) { console.error(err); setError("Could not rename the design."); }
   }
 
   function submitSearch(e) {
@@ -185,7 +198,32 @@ export default function HomePage() {
 
         {/* Recent designs */}
         <section>
-          <h2 className="mb-4 text-lg font-semibold text-slate-900">Your recent designs</h2>
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">Your recent designs</h2>
+            {projects && projects.length > 0 && (
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={designQuery}
+                    onChange={(e) => setDesignQuery(e.target.value)}
+                    placeholder="Search your designs…"
+                    className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-sm outline-none focus:border-brand-400 sm:w-56"
+                  />
+                </div>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-brand-400"
+                  aria-label="Sort designs"
+                >
+                  <option value="recent">Last edited</option>
+                  <option value="name">Name (A–Z)</option>
+                </select>
+              </div>
+            )}
+          </div>
+
           {projects === null ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -199,40 +237,133 @@ export default function HomePage() {
               <span className="text-sm font-medium">No designs yet — create your first one</span>
               <span className="text-xs">Pick a template or a blank format above</span>
             </button>
-          ) : (
-            <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {projects.map((p) => (
-                <li key={p.id}>
-                  <button type="button" onClick={() => router.push(`/editor/${p.id}`)}
-                    className="group flex w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition hover:border-brand-400 hover:shadow-md">
-                    <div className="relative aspect-video w-full overflow-hidden bg-slate-100">
-                      {p.thumbnail ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={p.thumbnail} alt={p.name} className="h-full w-full object-contain" />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-slate-300"><ImageOff size={26} /></div>
-                      )}
-                      <span onClick={(e) => handleDelete(e, p.id)} role="button" aria-label="Delete design"
-                        className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-white/90 text-slate-500 opacity-0 shadow-sm transition hover:text-rose-600 group-hover:opacity-100">
-                        <Trash2 size={15} />
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-slate-800">{p.name || "Untitled"}</p>
-                        <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)}</p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">{p.width}×{p.height}</span>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
+          ) : (() => {
+            const q = designQuery.trim().toLowerCase();
+            const visible = projects
+              .filter((p) => !q || (p.name || "").toLowerCase().includes(q))
+              .sort((a, b) =>
+                sortBy === "name"
+                  ? (a.name || "").localeCompare(b.name || "")
+                  : (b.updatedAt || 0) - (a.updatedAt || 0)
+              );
+            if (visible.length === 0) {
+              return <p className="py-10 text-center text-sm text-slate-400">No designs match “{designQuery}”.</p>;
+            }
+            return (
+              <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                {visible.map((p) => (
+                  <li key={p.id}>
+                    <DesignCard
+                      p={p}
+                      onOpen={(id) => router.push(`/editor/${id}`)}
+                      onRename={handleRename}
+                      onDuplicate={handleDuplicate}
+                      onDelete={handleDelete}
+                    />
+                  </li>
+                ))}
+              </ul>
+            );
+          })()}
         </section>
       </main>
 
       <NewDesignDialog open={showNew} onClose={() => setShowNew(false)} onCreate={quickCreate} />
+    </div>
+  );
+}
+
+function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
+  const [menu, setMenu] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(p.name || "");
+  const [busy, setBusy] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => { setName(p.name || ""); }, [p.name]);
+  useEffect(() => {
+    if (!menu) return;
+    function onDown(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false); }
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menu]);
+
+  async function commitRename() {
+    const v = name.trim();
+    setRenaming(false);
+    if (v && v !== p.name) await onRename(p.id, v);
+    else setName(p.name || "");
+  }
+  async function duplicate() {
+    setMenu(false);
+    setBusy(true);
+    try { await onDuplicate(p.id); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:border-brand-400 hover:shadow-md">
+      <button type="button" onClick={() => onOpen(p.id)} className="relative block aspect-video w-full overflow-hidden bg-slate-100">
+        {p.thumbnail ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={p.thumbnail} alt={p.name} className="h-full w-full object-contain" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-slate-300"><ImageOff size={26} /></div>
+        )}
+      </button>
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+        <div className="min-w-0 flex-1">
+          {renaming ? (
+            <input
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRename();
+                if (e.key === "Escape") { setName(p.name || ""); setRenaming(false); }
+              }}
+              className="w-full rounded border border-brand-400 px-1.5 py-0.5 text-sm font-semibold text-slate-800 outline-none"
+            />
+          ) : (
+            <p
+              className="truncate text-sm font-semibold text-slate-800"
+              title={p.name || "Untitled"}
+              onDoubleClick={() => setRenaming(true)}
+            >
+              {p.name || "Untitled"}
+            </p>
+          )}
+          <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)} · {p.width}×{p.height}</p>
+        </div>
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            aria-label="Design actions"
+            onClick={() => setMenu((v) => !v)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+          >
+            <MoreVertical size={16} />
+          </button>
+          {menu && (
+            <div className="absolute right-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+              <button type="button" onClick={() => { setMenu(false); setRenaming(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                <Pencil size={14} /> Rename
+              </button>
+              <button type="button" onClick={duplicate} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+                <Copy size={14} /> Duplicate
+              </button>
+              <button type="button" onClick={() => { setMenu(false); onDelete(p.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50">
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      {busy && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/60">
+          <Loader2 size={18} className="animate-spin text-brand-600" />
+        </div>
+      )}
     </div>
   );
 }
