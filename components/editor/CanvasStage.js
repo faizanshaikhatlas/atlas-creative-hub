@@ -19,6 +19,7 @@ export default function CanvasStage({
   initialPageJson,
   initialPageWidth,
   initialPageHeight,
+  initialPageGuides,
 }) {
   const canvasElRef = useRef(null);
   const workspaceRef = useRef(null);
@@ -70,6 +71,7 @@ export default function CanvasStage({
         await controller.loadPage(initialPageId, initialPageJson, {
           width: initialPageWidth ?? project.width,
           height: initialPageHeight ?? project.height,
+          guides: initialPageGuides,
         });
       } catch (err) {
         console.error("Failed to load project JSON:", err);

@@ -13,7 +13,9 @@ import {
   Loader2,
   Ruler,
   Magnet,
+  Grid3x3,
   Play,
+  Keyboard,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 
@@ -32,7 +34,7 @@ function IconButton({ title, onClick, disabled, children }) {
   );
 }
 
-export default function Toolbar({ controllerRef, onBack, onExport, onPresent, onSave, onFit }) {
+export default function Toolbar({ controllerRef, onBack, onExport, onPresent, onSave, onFit, onHelp }) {
   const projectName = useEditorStore((s) => s.projectName);
   const setProjectName = useEditorStore((s) => s.setProjectName);
   const zoom = useEditorStore((s) => s.zoom);
@@ -45,6 +47,10 @@ export default function Toolbar({ controllerRef, onBack, onExport, onPresent, on
   const setSnapEnabled = useEditorStore((s) => s.setSnapEnabled);
   const showRulers = useEditorStore((s) => s.showRulers);
   const setShowRulers = useEditorStore((s) => s.setShowRulers);
+  const showGrid = useEditorStore((s) => s.showGrid);
+  const setShowGrid = useEditorStore((s) => s.setShowGrid);
+  const gridSize = useEditorStore((s) => s.gridSize);
+  const setGridSize = useEditorStore((s) => s.setGridSize);
 
   const c = () => controllerRef.current;
 
@@ -63,6 +69,12 @@ export default function Toolbar({ controllerRef, onBack, onExport, onPresent, on
     const next = !snapEnabled;
     setSnapEnabled(next);
     controllerRef.current?.setSnapEnabled(next);
+  }
+
+  function toggleGrid() {
+    const next = !showGrid;
+    setShowGrid(next);
+    controllerRef.current?.setGridVisible(next);
   }
 
   return (
@@ -159,8 +171,34 @@ export default function Toolbar({ controllerRef, onBack, onExport, onPresent, on
                 <span className="inline-flex items-center gap-2"><Magnet size={15} /> Snap to guides</span>
                 <span className={`text-xs font-medium ${snapEnabled ? "text-brand-600" : "text-slate-400"}`}>{snapEnabled ? "On" : "Off"}</span>
               </button>
+              <button
+                type="button"
+                onClick={toggleGrid}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+              >
+                <span className="inline-flex items-center gap-2"><Grid3x3 size={15} /> Grid</span>
+                <span className={`text-xs font-medium ${showGrid ? "text-brand-600" : "text-slate-400"}`}>{showGrid ? "On" : "Off"}</span>
+              </button>
+              {showGrid && (
+                <div className="flex items-center justify-between px-3 py-2 text-sm text-slate-600">
+                  <span>Grid size</span>
+                  <select
+                    value={gridSize}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      setGridSize(v);
+                      controllerRef.current?.setGridSize(v);
+                    }}
+                    className="rounded-md border border-slate-200 px-1.5 py-1 text-xs text-slate-700 outline-none focus:border-brand-500"
+                  >
+                    {[10, 20, 50, 100].map((s) => (
+                      <option key={s} value={s}>{s} px</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="my-1 border-t border-slate-100" />
-              <p className="px-3 py-1 text-[11px] text-slate-400">Turn rulers on, then click a ruler to add a guide.</p>
+              <p className="px-3 py-1 text-[11px] text-slate-400">Click a ruler to add a guide · Alt-click to remove the nearest.</p>
               <button
                 type="button"
                 onClick={() => { setViewOpen(false); controllerRef.current?.clearGuides(); }}
@@ -174,6 +212,10 @@ export default function Toolbar({ controllerRef, onBack, onExport, onPresent, on
 
         <IconButton title="Present (fullscreen)" onClick={() => onPresent?.()} disabled={!canvasReady}>
           <Play size={18} />
+        </IconButton>
+
+        <IconButton title="Keyboard shortcuts (?)" onClick={() => onHelp?.()}>
+          <Keyboard size={18} />
         </IconButton>
 
         <div className="mx-1 hidden h-6 w-px bg-slate-200 sm:block" />

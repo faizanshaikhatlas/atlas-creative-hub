@@ -15,9 +15,13 @@ import {
   MousePointerClick,
   FlipHorizontal,
   FlipVertical,
+  Link,
+  Unlink,
+  RotateCcw,
+  RotateCw,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
-import { SIZE_PRESETS, clampDim } from "@/lib/db/projects";
+import { SIZE_PRESETS, clampDim, listUploads } from "@/lib/db/projects";
 import { FONTS } from "@/lib/fonts";
 
 function Row({ label, children }) {
@@ -47,6 +51,41 @@ function ColorField({ value, onChange }) {
         className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-brand-500"
       />
     </div>
+  );
+}
+
+/**
+ * Numeric field that commits only on blur or Enter (so typing "150" doesn't
+ * resize through 1 → 15 → 150). Re-syncs if the underlying value changes
+ * externally, e.g. when the object is drag-resized on the canvas.
+ */
+function DimInput({ value, onCommit, ariaLabel }) {
+  const [v, setV] = useState(String(value));
+  useEffect(() => {
+    setV(String(value));
+  }, [value]);
+  const commit = () => {
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 1) onCommit(Math.round(n));
+    else setV(String(value));
+  };
+  return (
+    <input
+      type="number"
+      min={1}
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+          e.currentTarget.blur();
+        }
+      }}
+      className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-brand-500"
+      aria-label={ariaLabel}
+    />
   );
 }
 
@@ -84,6 +123,31 @@ const MASKS = [
   { label: "Rounded", value: "rounded" },
   { label: "Triangle", value: "triangle" },
   { label: "Diamond", value: "diamond" },
+];
+
+const BLEND_MODES = [
+  ["source-over", "Normal"],
+  ["multiply", "Multiply"],
+  ["screen", "Screen"],
+  ["overlay", "Overlay"],
+  ["darken", "Darken"],
+  ["lighten", "Lighten"],
+  ["color-burn", "Color burn"],
+  ["color-dodge", "Color dodge"],
+  ["hard-light", "Hard light"],
+  ["soft-light", "Soft light"],
+  ["difference", "Difference"],
+  ["exclusion", "Exclusion"],
+  ["luminosity", "Luminosity"],
+];
+
+const DUOTONE_PRESETS = [
+  { label: "Indigo", shadow: "#1e1b4b", highlight: "#e0e7ff" },
+  { label: "Teal", shadow: "#042f2e", highlight: "#ccfbf1" },
+  { label: "Rose", shadow: "#4c0519", highlight: "#ffe4e6" },
+  { label: "Amber", shadow: "#451a03", highlight: "#fde68a" },
+  { label: "Ocean", shadow: "#0c2d6b", highlight: "#dbeafe" },
+  { label: "Mono", shadow: "#0a0a0a", highlight: "#fafafa" },
 ];
 
 function FillControl({ sel, controllerRef, allowImage }) {
@@ -235,6 +299,201 @@ function AdjustSlider({ label, value, onChange }) {
   );
 }
 
+function ShadowSlider({ label, min, max, value, onChange }) {
+  return (
+    <div>
+      <div className="flex justify-between text-[11px] text-slate-500">
+        <span>{label}</span>
+        <span className="tabular-nums">{Math.round(value)}</span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-brand-600"
+      />
+    </div>
+  );
+}
+
+/**
+ * Drop-shadow editor for the active object (text, shape, or image): an On/Off
+ * toggle plus color, blur, and offset controls once enabled. Renders bare so it
+ * can be dropped into any "Effects" container.
+ */
+function ShadowControl({ sel, controllerRef }) {
+  const c = () => controllerRef.current;
+  const on = !!sel.hasShadow;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm text-slate-600">Shadow</span>
+        <Toggle
+          title="Toggle shadow"
+          active={on}
+          onClick={() => c()?.setShadow(!on, sel.shadowColor)}
+        >
+          <span className="text-xs font-medium">{on ? "On" : "Off"}</span>
+        </Toggle>
+      </div>
+      {on && (
+        <div className="space-y-2">
+          <ColorField
+            value={sel.shadowColor}
+            onChange={(v) => c()?.setShadowProps({ color: v })}
+          />
+          <ShadowSlider
+            label="Blur"
+            min={0}
+            max={60}
+            value={sel.shadowBlur ?? 10}
+            onChange={(v) => c()?.setShadowProps({ blur: v })}
+          />
+          <ShadowSlider
+            label="Offset X"
+            min={-60}
+            max={60}
+            value={sel.shadowOffsetX ?? 4}
+            onChange={(v) => c()?.setShadowProps({ offsetX: v })}
+          />
+          <ShadowSlider
+            label="Offset Y"
+            min={-60}
+            max={60}
+            value={sel.shadowOffsetY ?? 4}
+            onChange={(v) => c()?.setShadowProps({ offsetY: v })}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Two-color duotone editor for an image: preset pairs plus independent shadow /
+ * highlight color pickers. Each change re-applies the duotone filter stack.
+ */
+function DuotoneControl({ sel, controllerRef }) {
+  const c = () => controllerRef.current;
+  const shadow = sel.duotoneShadow || "#1e1b4b";
+  const highlight = sel.duotoneHighlight || "#e0e7ff";
+  const apply = (patch) => c()?.setImageAdjustments({ duotone: true, ...patch });
+  return (
+    <div className="space-y-2 pt-1">
+      <div className="flex flex-wrap gap-1.5">
+        {DUOTONE_PRESETS.map((p) => {
+          const active =
+            p.shadow.toLowerCase() === shadow.toLowerCase() &&
+            p.highlight.toLowerCase() === highlight.toLowerCase();
+          return (
+            <button
+              key={p.label}
+              type="button"
+              title={p.label}
+              onClick={() => apply({ duotoneShadow: p.shadow, duotoneHighlight: p.highlight })}
+              className={`h-7 w-7 overflow-hidden rounded-full border transition ${
+                active ? "ring-2 ring-brand-500 ring-offset-1" : "border-slate-200 hover:scale-105"
+              }`}
+            >
+              <span
+                className="block h-full w-full"
+                style={{ background: `linear-gradient(135deg, ${p.shadow} 0 50%, ${p.highlight} 50% 100%)` }}
+              />
+            </button>
+          );
+        })}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <span className="mb-1 block text-[11px] text-slate-500">Shadows</span>
+          <input
+            type="color"
+            value={shadow}
+            onChange={(e) => apply({ duotoneShadow: e.target.value })}
+            className="h-8 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+            aria-label="Duotone shadow color"
+          />
+        </div>
+        <div>
+          <span className="mb-1 block text-[11px] text-slate-500">Highlights</span>
+          <input
+            type="color"
+            value={highlight}
+            onChange={(e) => apply({ duotoneHighlight: e.target.value })}
+            className="h-8 w-full cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+            aria-label="Duotone highlight color"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Replace the active image while keeping its frame. Offers a device file picker
+ * and a grid of the user's saved uploads; either path calls replaceActiveImage.
+ */
+function ReplaceControl({ controllerRef }) {
+  const c = () => controllerRef.current;
+  const fileRef = useRef(null);
+  const [uploads, setUploads] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    listUploads()
+      .then((u) => alive && setUploads(u || []))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const replaceWith = (url) => c()?.replaceActiveImage(url).catch(() => {});
+
+  function onFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || !f.type?.startsWith("image/")) return;
+    const r = new FileReader();
+    r.onload = () => replaceWith(String(r.result));
+    r.readAsDataURL(f);
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        className="w-full rounded-md border border-slate-200 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+      >
+        Upload from device…
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" onChange={onFile} className="hidden" />
+      {uploads.length > 0 && (
+        <>
+          <p className="text-[11px] text-slate-400">From your uploads</p>
+          <div className="grid grid-cols-4 gap-1.5">
+            {uploads.slice(0, 12).map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => replaceWith(u.dataUrl)}
+                title={u.name || "Upload"}
+                className="aspect-square overflow-hidden rounded-md border border-slate-200 transition hover:ring-2 hover:ring-brand-400"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={u.dataUrl} alt={u.name || "Upload"} className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function PageSizeControl({ onResizePage }) {
   const pageSize = useEditorStore((s) => s.pageSize);
   const [w, setW] = useState(pageSize.width);
@@ -322,6 +581,7 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
   const pageBackground = useEditorStore((s) => s.pageBackground);
   const c = () => controllerRef.current;
   const set = (k, v) => c()?.setActiveProp(k, v);
+  const [lockAspect, setLockAspect] = useState(true);
 
   if (!sel) {
     return (
@@ -507,23 +767,24 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
             </Row>
           </div>
 
+          <Row label={`Curve (${Math.round(sel.curve ?? 0)})`}>
+            <input
+              type="range"
+              min={-100}
+              max={100}
+              value={sel.curve ?? 0}
+              onChange={(e) => c()?.setTextCurve(Number(e.target.value))}
+              className="w-full accent-brand-600"
+            />
+          </Row>
+
           {/* Text effects */}
           <div className="space-y-2 rounded-lg bg-slate-50 p-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
               Effects
             </p>
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-slate-600">Shadow</span>
-              <Toggle
-                title="Toggle shadow"
-                active={!!sel.hasShadow}
-                onClick={() => c()?.setShadow(!sel.hasShadow, sel.shadowColor)}
-              >
-                <span className="text-xs font-medium">
-                  {sel.hasShadow ? "On" : "Off"}
-                </span>
-              </Toggle>
-            </div>
+            <ShadowControl sel={sel} controllerRef={controllerRef} />
+            <div className="border-t border-slate-200/70" />
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm text-slate-600">Highlight</span>
               <div className="flex items-center gap-2">
@@ -557,6 +818,10 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
 
       {sel.isImage && (
         <>
+          <Row label="Replace">
+            <ReplaceControl controllerRef={controllerRef} />
+          </Row>
+
           <Row label="Position">
             <div className="grid grid-cols-2 gap-1.5">
               <button
@@ -680,6 +945,11 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
                 </Toggle>
               ))}
             </div>
+            {sel.duotone && <DuotoneControl sel={sel} controllerRef={controllerRef} />}
+          </div>
+
+          <div className="rounded-lg bg-slate-50 p-3">
+            <ShadowControl sel={sel} controllerRef={controllerRef} />
           </div>
         </>
       )}
@@ -696,17 +966,8 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
 
       {/* Shadow for shapes */}
       {!isText && !sel.isImage && !sel.isMultiple && (
-        <div className="flex items-center justify-between rounded-lg bg-slate-50 p-3">
-          <span className="text-sm text-slate-600">Shadow</span>
-          <Toggle
-            title="Toggle shadow"
-            active={!!sel.hasShadow}
-            onClick={() => c()?.setShadow(!sel.hasShadow, sel.shadowColor)}
-          >
-            <span className="text-xs font-medium">
-              {sel.hasShadow ? "On" : "Off"}
-            </span>
-          </Toggle>
+        <div className="rounded-lg bg-slate-50 p-3">
+          <ShadowControl sel={sel} controllerRef={controllerRef} />
         </div>
       )}
 
@@ -760,6 +1021,50 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
         />
       </Row>
 
+      {!sel.isMultiple && (
+        <Row label="Blend mode">
+          <select
+            value={sel.blendMode || "source-over"}
+            onChange={(e) => c()?.setBlendMode(e.target.value)}
+            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-brand-500"
+          >
+            {BLEND_MODES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Row>
+      )}
+
+      <Row label="Size">
+        <div className="flex items-center gap-1.5">
+          <DimInput
+            value={Math.round(sel.w ?? 0)}
+            onCommit={(n) => c()?.setActiveDimension("w", n, lockAspect)}
+            ariaLabel="Width"
+          />
+          <button
+            type="button"
+            onClick={() => setLockAspect((v) => !v)}
+            title={lockAspect ? "Aspect ratio locked" : "Aspect ratio unlocked"}
+            aria-pressed={lockAspect}
+            className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border transition ${
+              lockAspect
+                ? "border-brand-500 bg-brand-50 text-brand-600"
+                : "border-slate-200 text-slate-400 hover:bg-slate-50"
+            }`}
+          >
+            {lockAspect ? <Link size={14} /> : <Unlink size={14} />}
+          </button>
+          <DimInput
+            value={Math.round(sel.h ?? 0)}
+            onCommit={(n) => c()?.setActiveDimension("h", n, lockAspect)}
+            ariaLabel="Height"
+          />
+        </div>
+      </Row>
+
       <div className="grid grid-cols-2 gap-3">
         <Row label="X">
           <input
@@ -780,14 +1085,34 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
       </div>
 
       <Row label={`Rotation (${Math.round(sel.angle ?? 0)}°)`}>
-        <input
-          type="range"
-          min={0}
-          max={360}
-          value={sel.angle ?? 0}
-          onChange={(e) => set("angle", Number(e.target.value))}
-          className="w-full accent-brand-600"
-        />
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={0}
+            max={360}
+            value={sel.angle ?? 0}
+            onChange={(e) => set("angle", Number(e.target.value))}
+            className="w-full accent-brand-600"
+          />
+          <button
+            type="button"
+            title="Rotate 90° left"
+            aria-label="Rotate 90° left"
+            onClick={() => c()?.rotateBy(-90)}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"
+          >
+            <RotateCcw size={15} />
+          </button>
+          <button
+            type="button"
+            title="Rotate 90° right"
+            aria-label="Rotate 90° right"
+            onClick={() => c()?.rotateBy(90)}
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50"
+          >
+            <RotateCw size={15} />
+          </button>
+        </div>
       </Row>
     </div>
   );

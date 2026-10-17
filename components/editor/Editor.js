@@ -22,6 +22,7 @@ import BrandKitPanel from "@/components/editor/BrandKitPanel";
 import TemplatesPanel from "@/components/editor/TemplatesPanel";
 import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
+import ShortcutsOverlay from "@/components/editor/ShortcutsOverlay";
 import PagesBar from "@/components/editor/PagesBar";
 import ExportDialog from "@/components/editor/ExportDialog";
 import PresentMode from "@/components/editor/PresentMode";
@@ -40,6 +41,7 @@ export default function Editor({ project }) {
   const [leftTab, setLeftTab] = useState("elements");
   const [menu, setMenu] = useState(null);
   const [showExport, setShowExport] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   const [present, setPresent] = useState(null); // { pages, index } | null
 
   // Multi-page document state. `pagesRef` mirrors it so the autosave callback
@@ -89,7 +91,8 @@ export default function Editor({ project }) {
     if (!c) return ps;
     const json = c.toJSON();
     const thumbnail = c.getThumbnail();
-    return ps.map((p) => (p.id === activeId ? { ...p, json, thumbnail } : p));
+    const guides = c.getGuides();
+    return ps.map((p) => (p.id === activeId ? { ...p, json, thumbnail, guides } : p));
   }, []);
 
   const applyPages = useCallback((ps, activeId) => {
@@ -116,7 +119,7 @@ export default function Editor({ project }) {
       const target = captured.find((p) => p.id === id);
       if (!target) return;
       applyPages(captured, id);
-      c.loadPage(id, target.json, { width: target.width, height: target.height });
+      c.loadPage(id, target.json, { width: target.width, height: target.height, guides: target.guides });
       afterLoad();
       markDirty();
     },
@@ -139,7 +142,7 @@ export default function Editor({ project }) {
     const idx = captured.findIndex((p) => p.id === pagesRef.current.activePageId);
     const next = [...captured.slice(0, idx + 1), np, ...captured.slice(idx + 1)];
     applyPages(next, np.id);
-    c.loadPage(np.id, np.json, { width: np.width, height: np.height });
+    c.loadPage(np.id, np.json, { width: np.width, height: np.height, guides: np.guides });
     afterLoad();
     markDirty();
   }, [captureActive, applyPages, project.width, project.height]);
@@ -162,7 +165,7 @@ export default function Editor({ project }) {
         ...captured.slice(srcIdx + 1),
       ];
       applyPages(next, copy.id);
-      c.loadPage(copy.id, copy.json, { width: copy.width, height: copy.height });
+      c.loadPage(copy.id, copy.json, { width: copy.width, height: copy.height, guides: copy.guides });
       afterLoad();
       markDirty();
     },
@@ -196,6 +199,7 @@ export default function Editor({ project }) {
         c.loadPage(newActive, target.json, {
           width: target.width,
           height: target.height,
+          guides: target.guides,
         });
         afterLoad();
       }
@@ -341,7 +345,10 @@ export default function Editor({ project }) {
       }
       if (inField || editingText) return;
 
-      if (meta && (key === "z" || key === "Z")) {
+      if (key === "?") {
+        e.preventDefault();
+        setShowShortcuts(true);
+      } else if (meta && (key === "z" || key === "Z")) {
         e.preventDefault();
         if (e.shiftKey) c.redo();
         else c.undo();
@@ -520,6 +527,7 @@ export default function Editor({ project }) {
         onPresent={handlePresent}
         onSave={doSave}
         onFit={() => fitRef.current?.()}
+        onHelp={() => setShowShortcuts(true)}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -556,6 +564,7 @@ export default function Editor({ project }) {
             initialPageJson={initialPage.json}
             initialPageWidth={initialPage.width}
             initialPageHeight={initialPage.height}
+            initialPageGuides={initialPage.guides}
           />
 
           {canvasReady && selection && (
@@ -680,6 +689,8 @@ export default function Editor({ project }) {
         controllerRef={controllerRef}
         onClose={() => setMenu(null)}
       />
+
+      {showShortcuts && <ShortcutsOverlay onClose={() => setShowShortcuts(false)} />}
 
       {showExport && (
         <ExportDialog

@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useEditorStore } from "@/lib/store/editorStore";
+import { listUploads } from "@/lib/db/projects";
 
 // Changing the page background only sets canvas.backgroundColor — existing
 // objects are untouched. The value serializes with the page JSON, so it is
@@ -26,6 +28,24 @@ const GRADIENTS = [
 export default function BackgroundsPanel({ controllerRef }) {
   const pageBackground = useEditorStore((s) => s.pageBackground);
   const c = () => controllerRef.current;
+  const fileRef = useRef(null);
+  const [uploads, setUploads] = useState([]);
+
+  useEffect(() => {
+    let alive = true;
+    listUploads()
+      .then((u) => alive && setUploads(u || []))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function onFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (f) c()?.setPageBackgroundImageFromFile(f).catch(() => {});
+  }
 
   return (
     <div className="ds-scroll flex h-full flex-col gap-5 overflow-y-auto p-4">
@@ -79,6 +99,43 @@ export default function BackgroundsPanel({ controllerRef }) {
             className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-brand-500"
           />
         </div>
+      </div>
+
+      <div>
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Image background</h2>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="flex-1 rounded-md border border-slate-200 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+          >
+            Upload image…
+          </button>
+          <button
+            type="button"
+            onClick={() => c()?.clearPageBackgroundImage()}
+            className="rounded-md border border-slate-200 px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+          >
+            Remove
+          </button>
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" onChange={onFile} className="hidden" />
+        {uploads.length > 0 && (
+          <div className="mt-2 grid grid-cols-4 gap-1.5">
+            {uploads.slice(0, 12).map((u) => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => c()?.setPageBackgroundImageFromUrl(u.dataUrl).catch(() => {})}
+                title={u.name || "Upload"}
+                className="aspect-square overflow-hidden rounded-md border border-slate-200 transition hover:ring-2 hover:ring-brand-400"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={u.dataUrl} alt={u.name || "Upload"} className="h-full w-full object-cover" />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <p className="mt-auto rounded-lg bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-400">

@@ -31,13 +31,18 @@ export default function Rulers({ outerRef, artboardRef, workspaceRef, controller
     const art = artboardRef.current;
     if (!art || !controllerRef?.current) return;
     const a = art.getBoundingClientRect();
-    controllerRef.current.addGuide("x", (e.clientX - a.left) / (zoom || 1));
+    const pos = (e.clientX - a.left) / (zoom || 1);
+    // Alt/Option-click removes the nearest guide instead of adding one.
+    if (e.altKey) controllerRef.current.removeGuideNear("x", pos);
+    else controllerRef.current.addGuide("x", pos);
   }
   function addGuideFromLeft(e) {
     const art = artboardRef.current;
     if (!art || !controllerRef?.current) return;
     const a = art.getBoundingClientRect();
-    controllerRef.current.addGuide("y", (e.clientY - a.top) / (zoom || 1));
+    const pos = (e.clientY - a.top) / (zoom || 1);
+    if (e.altKey) controllerRef.current.removeGuideNear("y", pos);
+    else controllerRef.current.addGuide("y", pos);
   }
 
   useEffect(() => {
@@ -124,8 +129,8 @@ export default function Rulers({ outerRef, artboardRef, workspaceRef, controller
   return (
     <>
       <div className="pointer-events-none absolute left-0 top-0 z-10 border-b border-r border-slate-200 bg-slate-50" style={{ width: RULER, height: RULER }} />
-      <canvas ref={topRef} onClick={addGuideFromTop} title="Click to add a vertical guide" className="absolute top-0 z-10 cursor-pointer border-b border-slate-200" style={{ left: RULER }} />
-      <canvas ref={leftRef} onClick={addGuideFromLeft} title="Click to add a horizontal guide" className="absolute left-0 z-10 cursor-pointer border-r border-slate-200" style={{ top: RULER }} />
+      <canvas ref={topRef} onClick={addGuideFromTop} title="Click to add a vertical guide · Alt-click to remove the nearest" className="absolute top-0 z-10 cursor-pointer border-b border-slate-200" style={{ left: RULER }} />
+      <canvas ref={leftRef} onClick={addGuideFromLeft} title="Click to add a horizontal guide · Alt-click to remove the nearest" className="absolute left-0 z-10 cursor-pointer border-r border-slate-200" style={{ top: RULER }} />
     </>
   );
 }
