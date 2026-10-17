@@ -154,6 +154,13 @@ export default function Toolbar({ controllerRef, onBack, onExport, onSave, onFit
               </button>
               <button
                 type="button"
+                onClick={() => pick("jpg")}
+                className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+              >
+                JPG <span className="text-slate-400">· this page</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => pick("svg")}
                 className="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
               >

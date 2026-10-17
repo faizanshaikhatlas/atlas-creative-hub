@@ -17,6 +17,8 @@ import Toolbar from "@/components/editor/Toolbar";
 import ElementsPanel from "@/components/editor/ElementsPanel";
 import PropertiesPanel from "@/components/editor/PropertiesPanel";
 import LayersPanel from "@/components/editor/LayersPanel";
+import BackgroundsPanel from "@/components/editor/BackgroundsPanel";
+import BrandKitPanel from "@/components/editor/BrandKitPanel";
 import TemplatesPanel from "@/components/editor/TemplatesPanel";
 import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
@@ -31,6 +33,7 @@ export default function Editor({ project }) {
   const router = useRouter();
   const controllerRef = useRef(null);
   const fitRef = useRef(null);
+  const clipboardRef = useRef(null); // in-app copy/paste buffer (serialized objects)
   const [toast, setToast] = useState(null);
   const [leftTab, setLeftTab] = useState("elements");
   const [menu, setMenu] = useState(null);
@@ -282,6 +285,25 @@ export default function Editor({ project }) {
     return () => clearTimeout(t);
   }, [rev, doSave]);
 
+  // Design recovery: flush any pending (debounced) save before the page is
+  // hidden or unloaded (refresh, tab close, tab switch, mobile background), so
+  // the last edit can't be lost in the debounce window. Best-effort — the write
+  // is kicked off while the page is still alive.
+  useEffect(() => {
+    const flush = () => {
+      if (useEditorStore.getState().isDirty) doSave();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [doSave]);
+
   expose({
     get: () => pagesRef.current,
     switch: (id) => switchPage(id),
@@ -340,6 +362,20 @@ export default function Editor({ project }) {
       } else if (meta && key === "[") {
         e.preventDefault();
         c.sendBackward();
+      } else if (meta && (key === "c" || key === "C")) {
+        // Copy selection to our in-app clipboard. With nothing selected we don't
+        // preventDefault, so the browser's own copy still works.
+        const objs = c.copySelection?.();
+        if (objs && objs.length) {
+          e.preventDefault();
+          clipboardRef.current = objs;
+        }
+      } else if (meta && (key === "v" || key === "V")) {
+        // Paste our clipboard if we have one; otherwise let the browser handle it.
+        if (clipboardRef.current && clipboardRef.current.length) {
+          e.preventDefault();
+          c.insertComponent(clipboardRef.current);
+        }
       } else if (key === "Delete" || key === "Backspace") {
         e.preventDefault();
         c.deleteActive();
@@ -418,7 +454,11 @@ export default function Editor({ project }) {
         );
         const suffix =
           pagesRef.current.pages.length > 1 ? `-page-${pageIdx + 1}` : "";
-        triggerDownload(c.exportPNG(), `${base}${suffix}.png`);
+        if (format === "jpg") {
+          triggerDownload(c.exportJPG(0.92), `${base}${suffix}.jpg`);
+        } else {
+          triggerDownload(c.exportPNG(), `${base}${suffix}.png`);
+        }
       }
     } catch (err) {
       console.error("Export failed:", err);
@@ -426,7 +466,13 @@ export default function Editor({ project }) {
     }
   }
 
-  function handleBack() {
+  async function handleBack() {
+    // Save any pending change before leaving the editor so nothing is lost.
+    try {
+      if (useEditorStore.getState().isDirty) await doSave();
+    } catch {
+      /* best-effort; navigation proceeds regardless */
+    }
     router.push("/");
   }
 
@@ -434,7 +480,7 @@ export default function Editor({ project }) {
     <button
       type="button"
       onClick={() => setLeftTab(id)}
-      className={`flex-1 border-b-2 px-1 py-2.5 text-[13px] font-medium transition ${
+      className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-[12px] font-medium transition ${
         leftTab === id
           ? "border-brand-500 text-brand-700"
           : "border-transparent text-slate-500 hover:text-slate-700"
@@ -456,14 +502,20 @@ export default function Editor({ project }) {
 
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
-          <div className="flex border-b border-slate-200">
+          <div className="ds-scroll flex overflow-x-auto border-b border-slate-200">
             {leftTabBtn("elements", "Elements")}
+            {leftTabBtn("backgrounds", "Background")}
+            {leftTabBtn("brand", "Brand")}
             {leftTabBtn("layers", "Layers")}
             {leftTabBtn("templates", "Templates")}
           </div>
           <div className="ds-scroll min-h-0 flex-1 overflow-y-auto">
             {leftTab === "elements" ? (
               <ElementsPanel controllerRef={controllerRef} />
+            ) : leftTab === "backgrounds" ? (
+              <BackgroundsPanel controllerRef={controllerRef} />
+            ) : leftTab === "brand" ? (
+              <BrandKitPanel controllerRef={controllerRef} />
             ) : leftTab === "layers" ? (
               <LayersPanel controllerRef={controllerRef} />
             ) : (

@@ -557,6 +557,25 @@ export default function PropertiesPanel({ controllerRef, onResizePage }) {
 
       {sel.isImage && (
         <>
+          <Row label="Position">
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => c()?.fitImageToPage("fit")}
+                className="rounded-md border border-slate-200 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+              >
+                Fit to page
+              </button>
+              <button
+                type="button"
+                onClick={() => c()?.fitImageToPage("fill")}
+                className="rounded-md border border-slate-200 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+              >
+                Fill page
+              </button>
+            </div>
+          </Row>
+
           <Row label="Flip">
             <div className="flex gap-1.5">
               <Toggle
