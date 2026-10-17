@@ -242,15 +242,19 @@ export default function Editor({ project }) {
   // Resize the active page (or all pages). Dimensions live in the page model;
   // the live canvas is resized immediately and the view re-fits.
   const resizePage = useCallback(
-    (width, height, allPages = false) => {
+    (width, height, allPages = false, smart = false) => {
       const c = controllerRef.current;
       if (!c || !width || !height) return;
       const { pages: cur, activePageId: act } = pagesRef.current;
+      // Smart resize reflows the active page's objects, so it applies to the
+      // active page only (not every page at once).
+      const applyAll = allPages && !smart;
       const next = cur.map((p) =>
-        allPages || p.id === act ? { ...p, width, height } : p
+        applyAll || p.id === act ? { ...p, width, height } : p
       );
       applyPages(next);
-      c.setPageDimensions(width, height);
+      if (smart) c.smartResizeActivePage(width, height);
+      else c.setPageDimensions(width, height);
       afterLoad();
       markDirty();
     },

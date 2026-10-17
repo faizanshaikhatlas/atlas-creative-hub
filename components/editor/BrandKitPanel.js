@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, ImagePlus, Loader2, X } from "lucide-react";
+import { Plus, Trash2, ImagePlus, Loader2, X, Pencil } from "lucide-react";
 import { FONTS } from "@/lib/fonts";
 import { useEditorStore } from "@/lib/store/editorStore";
-import { saveBrandKit, listBrandKits, deleteBrandKit } from "@/lib/db/projects";
+import { saveBrandKit, listBrandKits, deleteBrandKit, updateBrandKit } from "@/lib/db/projects";
 
 // Built-in default kit — keeps ATLAS branding as the default brand kit.
 const ATLAS_KIT = {
@@ -49,6 +49,7 @@ export default function BrandKitPanel({ controllerRef }) {
   const [kits, setKits] = useState([ATLAS_KIT]);
   const [activeId, setActiveId] = useState("atlas-default");
   const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   async function refresh() {
     try {
@@ -61,6 +62,12 @@ export default function BrandKitPanel({ controllerRef }) {
   useEffect(() => { refresh(); }, []);
 
   const kit = kits.find((k) => k.id === activeId) || ATLAS_KIT;
+
+  async function saveEdits(patch) {
+    await updateBrandKit(kit.id, patch);
+    await refresh();
+    setEditing(false);
+  }
 
   function applyColor(hex) {
     const ctrl = c();
@@ -91,20 +98,31 @@ export default function BrandKitPanel({ controllerRef }) {
       <div>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Brand kit</h2>
-          <button
-            type="button"
-            onClick={() => setShowForm((v) => !v)}
-            className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
-          >
-            {showForm ? <X size={13} /> : <Plus size={13} />} {showForm ? "Cancel" : "New"}
-          </button>
+          <div className="flex items-center gap-3">
+            {!kit.builtin && !showForm && (
+              <button
+                type="button"
+                onClick={() => setEditing((v) => !v)}
+                className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-600 hover:underline"
+              >
+                <Pencil size={12} /> {editing ? "Done" : "Edit"}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => { setShowForm((v) => !v); setEditing(false); }}
+              className="inline-flex items-center gap-1 text-xs font-medium text-brand-600 hover:underline"
+            >
+              {showForm ? <X size={13} /> : <Plus size={13} />} {showForm ? "Cancel" : "New"}
+            </button>
+          </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {kits.map((k) => (
             <span key={k.id} className="relative">
               <button
                 type="button"
-                onClick={() => setActiveId(k.id)}
+                onClick={() => { setActiveId(k.id); setEditing(false); }}
                 className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                   activeId === k.id ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600 hover:border-slate-300"
                 }`}
@@ -128,6 +146,10 @@ export default function BrandKitPanel({ controllerRef }) {
 
       {showForm && <NewKitForm onSaved={async (id) => { setShowForm(false); await refresh(); setActiveId(id); }} />}
 
+      {editing && !kit.builtin && <EditKit key={kit.id} kit={kit} onSave={saveEdits} />}
+
+      {!editing && (
+      <>
       {/* Colors */}
       <div>
         <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Colors</h3>
@@ -194,6 +216,139 @@ export default function BrandKitPanel({ controllerRef }) {
           </div>
         </div>
       )}
+      </>
+      )}
+    </div>
+  );
+}
+
+function EditKit({ kit, onSave }) {
+  const [name, setName] = useState(kit.name || "");
+  const [colors, setColors] = useState(kit.colors || []);
+  const [headingFont, setHeadingFont] = useState(kit.headingFont || FONTS[2].label);
+  const [bodyFont, setBodyFont] = useState(kit.bodyFont || FONTS[0].label);
+  const [logos, setLogos] = useState(kit.logos || []);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const setColor = (i, hex) => setColors(colors.map((c, j) => (j === i ? hex : c)));
+  const removeColor = (i) => setColors(colors.filter((_, j) => j !== i));
+
+  async function addLogos(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    try {
+      const urls = [];
+      for (const f of files) if (f.type?.startsWith("image/")) urls.push(await readLogo(f));
+      if (urls.length) setLogos((l) => [...l, ...urls].slice(0, 24));
+      setError(null);
+    } catch {
+      setError("Could not read a logo.");
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onSave({ name, colors, headingFont, bodyFont, logos });
+    } catch (err) {
+      console.error("Brand kit update failed:", err);
+      setError("Could not save changes.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-brand-200 bg-brand-50/40 p-3">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-600">Edit brand kit</p>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Kit name"
+        className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm outline-none focus:border-brand-500"
+      />
+
+      <div>
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Colors</p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {colors.map((hex, i) => (
+            <span key={i} className="relative">
+              <input
+                type="color"
+                value={hex}
+                onChange={(e) => setColor(i, e.target.value)}
+                className="h-8 w-8 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+              />
+              <span
+                role="button"
+                aria-label="Remove color"
+                onClick={() => removeColor(i)}
+                className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-400 shadow hover:text-rose-600"
+              >
+                <X size={9} />
+              </span>
+            </span>
+          ))}
+          {colors.length < 16 && (
+            <button type="button" onClick={() => setColors([...colors, "#000000"])}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-dashed border-slate-300 text-slate-400 hover:text-brand-600">
+              <Plus size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <label className="text-[11px] text-slate-500">
+          Heading
+          <select value={headingFont} onChange={(e) => setHeadingFont(e.target.value)}
+            className="mt-1 w-full rounded-md border border-slate-200 px-1.5 py-1 text-xs outline-none focus:border-brand-500">
+            {FONTS.map((f) => <option key={f.label} value={f.label}>{f.label}</option>)}
+          </select>
+        </label>
+        <label className="text-[11px] text-slate-500">
+          Body
+          <select value={bodyFont} onChange={(e) => setBodyFont(e.target.value)}
+            className="mt-1 w-full rounded-md border border-slate-200 px-1.5 py-1 text-xs outline-none focus:border-brand-500">
+            {FONTS.map((f) => <option key={f.label} value={f.label}>{f.label}</option>)}
+          </select>
+        </label>
+      </div>
+
+      <div>
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Logos</p>
+        <div className="flex flex-wrap items-center gap-2">
+          {logos.map((url, i) => (
+            <span key={i} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt="Logo" className="h-10 w-10 rounded border border-slate-200 bg-white object-contain p-1" />
+              <span
+                role="button"
+                aria-label="Remove logo"
+                onClick={() => setLogos(logos.filter((_, j) => j !== i))}
+                className="absolute -right-1 -top-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-white text-slate-400 shadow hover:text-rose-600"
+              >
+                <X size={9} />
+              </span>
+            </span>
+          ))}
+          <label className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-md border border-dashed border-slate-300 bg-white px-2.5 text-xs font-medium text-slate-500 hover:border-brand-400 hover:text-brand-600">
+            <ImagePlus size={14} /> Add
+            <input type="file" accept="image/*" multiple onChange={addLogos} className="hidden" />
+          </label>
+        </div>
+      </div>
+
+      {error && <p className="text-xs text-rose-600">{error}</p>}
+      <button
+        type="button"
+        onClick={save}
+        disabled={busy}
+        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-brand-600 py-2 text-sm font-semibold text-white hover:bg-brand-700 disabled:opacity-60"
+      >
+        {busy ? <Loader2 size={14} className="animate-spin" /> : null} Save changes
+      </button>
     </div>
   );
 }

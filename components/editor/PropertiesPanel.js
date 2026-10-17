@@ -506,6 +506,7 @@ function PageSizeControl({ onResizePage }) {
   const pageSize = useEditorStore((s) => s.pageSize);
   const [w, setW] = useState(pageSize.width);
   const [h, setH] = useState(pageSize.height);
+  const [smart, setSmart] = useState(false);
 
   // Keep local inputs in sync when the active page changes.
   useEffect(() => {
@@ -521,7 +522,7 @@ function PageSizeControl({ onResizePage }) {
     if (!preset) return;
     setW(preset.width);
     setH(preset.height);
-    onResizePage?.(preset.width, preset.height, false);
+    onResizePage?.(preset.width, preset.height, false, smart);
   }
 
   function applyCustom(allPages) {
@@ -529,7 +530,7 @@ function PageSizeControl({ onResizePage }) {
     const ch = clampDim(h, pageSize.height);
     setW(cw);
     setH(ch);
-    onResizePage?.(cw, ch, allPages);
+    onResizePage?.(cw, ch, allPages, smart);
   }
 
   return (
@@ -572,13 +573,23 @@ function PageSizeControl({ onResizePage }) {
             aria-label="Height"
           />
         </div>
+        <label className="flex items-center justify-between rounded-md bg-slate-50 px-2.5 py-2">
+          <span className="text-xs text-slate-600">Scale &amp; reposition objects</span>
+          <input type="checkbox" checked={smart} onChange={(e) => setSmart(e.target.checked)} className="h-4 w-4 accent-brand-600" />
+        </label>
         <button
           type="button"
           onClick={() => applyCustom(true)}
-          className="w-full rounded-md border border-slate-200 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+          disabled={smart}
+          title={smart ? "Smart resize applies to the current page only" : undefined}
+          className="w-full rounded-md border border-slate-200 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-40"
         >
           Apply to all pages
         </button>
+        <p className="text-[11px] leading-relaxed text-slate-400">
+          Turn on to reflow this page&apos;s objects when you change the size
+          (magic resize). Off = change the canvas size only.
+        </p>
       </div>
     </Row>
   );
