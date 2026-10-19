@@ -15,6 +15,8 @@ import {
 } from "@/lib/db/projects";
 import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
+import AccountMenu from "@/components/auth/AccountMenu";
+import CloudSync from "@/components/cloud/CloudSync";
 
 // Representative photo per theme for the browse tiles (already in /public).
 const THEME_PHOTO = {
@@ -115,6 +117,8 @@ export default function HomePage() {
               className="hidden rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:text-brand-700 sm:inline-flex">
               Templates
             </button>
+            <CloudSync onSynced={refresh} />
+            <AccountMenu />
             <button type="button" onClick={() => setShowNew(true)} disabled={creating}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60">
               {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create a design

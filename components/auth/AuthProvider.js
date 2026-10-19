@@ -16,6 +16,8 @@ const AuthContext = createContext({
   signInWithPassword: async () => {},
   signUpWithPassword: async () => {},
   signInWithMagicLink: async () => {},
+  resetPasswordForEmail: async () => {},
+  updatePassword: async () => {},
   signOut: async () => {},
 });
 
@@ -55,8 +57,17 @@ export function AuthProvider({ children }) {
   const signUpWithPassword = useCallback(async (email, password) => {
     const supabase = getSupabase();
     if (!supabase) throw new Error("Cloud is not configured.");
-    const { error } = await supabase.auth.signUp({ email, password });
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo:
+          typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+      },
+    });
     if (error) throw error;
+    // When email confirmation is required, no session is returned yet.
+    return { needsEmailConfirmation: !data?.session };
   }, []);
 
   const signInWithMagicLink = useCallback(async (email) => {
@@ -64,8 +75,36 @@ export function AuthProvider({ children }) {
     if (!supabase) throw new Error("Cloud is not configured.");
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined },
+      options: {
+        // Invite-only: a magic link must never CREATE an account, only sign in
+        // an existing user. (Defense-in-depth with the dashboard's disabled
+        // public signups.)
+        shouldCreateUser: false,
+        emailRedirectTo:
+          typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+      },
     });
+    if (error) throw error;
+  }, []);
+
+  const resetPasswordForEmail = useCallback(async (email) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Cloud is not configured.");
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      // Land on the code-exchange callback, which then forwards to the
+      // set-new-password page with a valid recovery session.
+      redirectTo:
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback?next=/update-password`
+          : undefined,
+    });
+    if (error) throw error;
+  }, []);
+
+  const updatePassword = useCallback(async (password) => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Cloud is not configured.");
+    const { error } = await supabase.auth.updateUser({ password });
     if (error) throw error;
   }, []);
 
@@ -83,6 +122,8 @@ export function AuthProvider({ children }) {
     signInWithPassword,
     signUpWithPassword,
     signInWithMagicLink,
+    resetPasswordForEmail,
+    updatePassword,
     signOut,
   };
 
