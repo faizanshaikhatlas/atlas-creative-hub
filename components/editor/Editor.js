@@ -23,6 +23,7 @@ import TemplatesPanel from "@/components/editor/TemplatesPanel";
 import ChartsPanel from "@/components/editor/ChartsPanel";
 import TablesPanel from "@/components/editor/TablesPanel";
 import QRPanel from "@/components/editor/QRPanel";
+import GridPanel from "@/components/editor/GridPanel";
 import AlignBar from "@/components/editor/AlignBar";
 import ContextMenu from "@/components/editor/ContextMenu";
 import ShortcutsOverlay from "@/components/editor/ShortcutsOverlay";
@@ -552,6 +553,7 @@ export default function Editor({ project }) {
             {leftTabBtn("charts", "Charts")}
             {leftTabBtn("tables", "Tables")}
             {leftTabBtn("qr", "QR")}
+            {leftTabBtn("grids", "Grids")}
             {leftTabBtn("layers", "Layers")}
             {leftTabBtn("templates", "Templates")}
           </div>
@@ -568,6 +570,8 @@ export default function Editor({ project }) {
               <TablesPanel controllerRef={controllerRef} />
             ) : leftTab === "qr" ? (
               <QRPanel controllerRef={controllerRef} />
+            ) : leftTab === "grids" ? (
+              <GridPanel controllerRef={controllerRef} />
             ) : leftTab === "layers" ? (
               <LayersPanel controllerRef={controllerRef} />
             ) : (

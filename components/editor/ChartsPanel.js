@@ -25,6 +25,21 @@ const DEFAULT_ROWS = [
 
 const clone = (s) => JSON.parse(JSON.stringify(s));
 
+// Mirror of the controller's default categorical palette (for showing defaults).
+const PALETTE = [
+  "#6366f1", "#ec4899", "#f59e0b", "#10b981", "#06b6d4",
+  "#8b5cf6", "#ef4444", "#3b82f6", "#14b8a6", "#f97316",
+];
+
+function Toggle({ label, checked, onChange }) {
+  return (
+    <label className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+      <span>{label}</span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-brand-600" />
+    </label>
+  );
+}
+
 function TypePicker({ value, onChange }) {
   return (
     <div>
@@ -164,6 +179,26 @@ function Editor({ spec, controllerRef }) {
     push(s);
   };
 
+  const isLine = (spec.type || "column") === "line";
+  const colorAt = (i) => (spec.colors && spec.colors[i]) || PALETTE[i % PALETTE.length];
+  const setColor = (i, hex) => {
+    const s = clone(spec);
+    const cols = s.colors && s.colors.length ? [...s.colors] : [];
+    while (cols.length < data.length) cols.push(PALETTE[cols.length % PALETTE.length]);
+    cols[i] = hex;
+    s.colors = cols;
+    push(s);
+  };
+  const resetColors = () => {
+    const s = clone(spec);
+    delete s.colors;
+    push(s);
+  };
+
+  const isPie = (spec.type || "column") === "pie" || spec.type === "donut";
+  const flag = (key) => spec[key] !== false; // default on
+  const setFlag = (key, on) => push({ ...clone(spec), [key]: on });
+
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-lg bg-brand-50 px-3 py-2 text-[11px] font-medium text-brand-700">
@@ -184,16 +219,56 @@ function Editor({ spec, controllerRef }) {
         />
       </div>
 
+      {isLine && (
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Line color</span>
+          <input
+            type="color"
+            value={colorAt(0)}
+            onChange={(e) => setColor(0, e.target.value)}
+            className="h-8 w-10 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+            aria-label="Line color"
+          />
+        </div>
+      )}
+
+      <div>
+        <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Labels &amp; axis</h2>
+        <div className="space-y-1.5">
+          <Toggle label={isPie ? "Show percentages" : "Value labels"} checked={flag("showValues")} onChange={(v) => setFlag("showValues", v)} />
+          {!isPie && (
+            <>
+              <Toggle label="Gridlines" checked={flag("showGrid")} onChange={(v) => setFlag("showGrid", v)} />
+              <Toggle label="Axis & scale" checked={flag("showAxis")} onChange={(v) => setFlag("showAxis", v)} />
+            </>
+          )}
+        </div>
+      </div>
+
       <div>
         <div className="mb-2 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Data</h2>
-          <button type="button" onClick={addRow} disabled={data.length >= 12} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
-            <Plus size={13} /> Row
-          </button>
+          <div className="flex items-center gap-2">
+            {spec.colors && (
+              <button type="button" onClick={resetColors} className="text-[11px] font-medium text-slate-500 hover:text-brand-600 hover:underline">Reset colors</button>
+            )}
+            <button type="button" onClick={addRow} disabled={data.length >= 12} className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+              <Plus size={13} /> Row
+            </button>
+          </div>
         </div>
         <div className="space-y-1.5">
           {data.map((row, i) => (
             <div key={`${dataKey}-${i}`} className="flex items-center gap-1.5">
+              {!isLine && (
+                <input
+                  type="color"
+                  value={colorAt(i)}
+                  onChange={(e) => setColor(i, e.target.value)}
+                  className="h-8 w-7 shrink-0 cursor-pointer rounded-md border border-slate-200 bg-white p-0.5"
+                  aria-label={`Series ${i + 1} color`}
+                />
+              )}
               <input
                 defaultValue={row.label}
                 onBlur={(e) => setCell(i, { label: e.target.value })}

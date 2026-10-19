@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Tag } from "lucide-react";
 import {
@@ -302,15 +303,54 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete, onSetTags }) {
   const [editingTags, setEditingTags] = useState(false);
   const [tagsValue, setTagsValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const menuRef = useRef(null);
+  const [pos, setPos] = useState(null); // fixed-position coords for the portal menu
+  const menuRef = useRef(null); // trigger wrapper
+  const popRef = useRef(null); // portal menu
+  const btnRef = useRef(null); // three-dot button (anchor)
 
   useEffect(() => { setName(p.name || ""); }, [p.name]);
   useEffect(() => {
     if (!menu) return;
-    function onDown(e) { if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false); }
+    function onDown(e) {
+      if (menuRef.current?.contains(e.target)) return;
+      if (popRef.current?.contains(e.target)) return;
+      setMenu(false);
+    }
+    function onKey(e) { if (e.key === "Escape") setMenu(false); }
+    // The menu is fixed-positioned from the button's rect, so any scroll or
+    // resize invalidates it — close rather than let it drift.
+    function onMove() { setMenu(false); }
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
   }, [menu]);
+
+  // Open the menu anchored to the button, flipping above / clamping to the
+  // viewport so it stays fully visible for any card position or screen edge.
+  function openMenu() {
+    const el = btnRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const menuW = 160;
+    const menuH = 176; // ~4 items + padding
+    const gap = 4;
+    let left = Math.min(r.right - menuW, window.innerWidth - 8 - menuW);
+    if (left < 8) left = 8;
+    let top = r.bottom + gap;
+    if (top + menuH > window.innerHeight - 8) {
+      const above = r.top - menuH - gap;
+      top = above >= 8 ? above : Math.max(8, window.innerHeight - 8 - menuH);
+    }
+    setPos({ top, left, width: menuW });
+    setMenu(true);
+  }
 
   async function commitRename() {
     const v = name.trim();
@@ -394,28 +434,37 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete, onSetTags }) {
         </div>
         <div className="relative" ref={menuRef}>
           <button
+            ref={btnRef}
             type="button"
             aria-label="Design actions"
-            onClick={() => setMenu((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={menu}
+            onClick={() => (menu ? setMenu(false) : openMenu())}
             className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
           >
             <MoreVertical size={16} />
           </button>
-          {menu && (
-            <div className="absolute right-0 top-full z-20 mt-1 w-36 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
-              <button type="button" onClick={() => { setMenu(false); setRenaming(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+          {menu && pos && createPortal(
+            <div
+              ref={popRef}
+              role="menu"
+              style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+              className="z-[200] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
+            >
+              <button type="button" role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
                 <Pencil size={14} /> Rename
               </button>
-              <button type="button" onClick={duplicate} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+              <button type="button" role="menuitem" onClick={duplicate} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
                 <Copy size={14} /> Duplicate
               </button>
-              <button type="button" onClick={startTags} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
+              <button type="button" role="menuitem" onClick={startTags} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
                 <Tag size={14} /> Edit tags
               </button>
-              <button type="button" onClick={() => { setMenu(false); onDelete(p.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50">
+              <button type="button" role="menuitem" onClick={() => { setMenu(false); onDelete(p.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50">
                 <Trash2 size={14} /> Delete
               </button>
-            </div>
+            </div>,
+            document.body
           )}
         </div>
       </div>
