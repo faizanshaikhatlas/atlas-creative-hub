@@ -198,9 +198,11 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
 function UserSection({ users, reload, busyId, setBusyId, setErr, adminEmail }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all"); // all | pending | approved | rejected | disabled
+  const [notice, setNotice] = useState(null);
 
   async function patch(id, patchBody) {
     setErr(null);
+    setNotice(null);
     setBusyId(id);
     try {
       const res = await fetch("/api/admin/users", {
@@ -210,6 +212,15 @@ function UserSection({ users, reload, busyId, setBusyId, setErr, adminEmail }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Could not update user.");
+      if (data.approvedNow) {
+        const u = (users || []).find((x) => x.id === id);
+        const who = u?.email ? ` to ${u.email}` : "";
+        setNotice(
+          data.setupEmailSent
+            ? `Approved. A password-setup / sign-in link was emailed${who}.`
+            : `Approved. No setup email was sent${who} (OAuth user, email not configured, or send failed) — they can sign in or use “Forgot password”.`
+        );
+      }
       reload();
     } catch (e2) {
       setErr(e2.message);
@@ -245,6 +256,13 @@ function UserSection({ users, reload, busyId, setBusyId, setErr, adminEmail }) {
           </span>
         )}
       </h2>
+
+      {notice && (
+        <div className="mb-3 flex items-start justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] text-emerald-800">
+          <span>{notice}</span>
+          <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-emerald-600 hover:text-emerald-800">✕</button>
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[180px]">

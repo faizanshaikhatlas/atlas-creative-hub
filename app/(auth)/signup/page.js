@@ -76,6 +76,10 @@ function PublicSignupForm() {
         <p className="mt-1 text-sm text-slate-500">
           We sent a confirmation link to <span className="font-medium text-slate-700">{email}</span>.
         </p>
+        <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-left text-xs leading-relaxed text-amber-800">
+          After you confirm your email, an administrator reviews and approves your account before cloud
+          backup, sync, and your cloud designs unlock. You can keep designing on this device in the meantime.
+        </p>
         <Link href="/login" className="mt-4 inline-block text-sm font-medium text-brand-600 hover:underline">Back to sign in</Link>
       </div>
     );
@@ -84,6 +88,9 @@ function PublicSignupForm() {
   return (
     <div>
       <h1 className="text-lg font-bold text-slate-900">Create account</h1>
+      <p className="mt-1 text-sm text-slate-500">
+        Verify your email, then an administrator approves your account before cloud features unlock.
+      </p>
       <form onSubmit={onSubmit} className="mt-5 space-y-3">
         <input
           type="email" required autoComplete="email" value={email}

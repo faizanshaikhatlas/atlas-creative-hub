@@ -1,10 +1,32 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/roles";
 import { getAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 
 const BAN_DURATION = "876000h"; // ~100 years = effectively disabled
+
+/**
+ * On first approval, send the user a secure "set your password & sign in" link.
+ * Uses Supabase's recovery email, which is delivered via the project's configured
+ * (custom) SMTP — no app-side mailer. Best-effort: never fails the approval.
+ * Skipped for OAuth (e.g. Google) users, who have no password to set.
+ * @returns {boolean} whether a setup email was dispatched
+ */
+async function sendApprovalSetupEmail(email, provider, request) {
+  if (!email || provider === "google") return false;
+  try {
+    const origin = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
+    const supabase = await createSupabaseServerClient();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${origin}/auth/callback?next=/update-password`,
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
 
 /** GET /api/admin/users → list all profiles (admin only). */
 export async function GET() {
@@ -49,7 +71,7 @@ export async function PATCH(request) {
   const svc = getAdminClient();
   const { data: target, error: tErr } = await svc
     .from("profiles")
-    .select("id, role, disabled")
+    .select("id, email, role, status, provider, disabled")
     .eq("id", id)
     .maybeSingle();
   if (tErr || !target) return NextResponse.json({ error: "User not found." }, { status: 404 });
@@ -104,5 +126,13 @@ export async function PATCH(request) {
   const { error: uErr } = await svc.from("profiles").update(updates).eq("id", id);
   if (uErr) return NextResponse.json({ error: "Could not update the user." }, { status: 500 });
 
-  return NextResponse.json({ ok: true });
+  // On the pending/rejected → approved transition, email the user a secure
+  // password-setup/sign-in link (best-effort; does not block the approval).
+  let setupEmailSent = false;
+  const approvedNow = updates.status === "approved" && target.status !== "approved";
+  if (approvedNow) {
+    setupEmailSent = await sendApprovalSetupEmail(target.email, target.provider, request);
+  }
+
+  return NextResponse.json({ ok: true, approvedNow, setupEmailSent });
 }

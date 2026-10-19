@@ -7,6 +7,7 @@ import {
   Star, Minus, ArrowRight, MoveHorizontal, ChevronRight, Plus, Heart, Check, MapPin,
   MessageSquare, ImagePlus, Trash2, Search, Loader2,
   Octagon, RectangleHorizontal, ArrowUp, Sparkles, Award, Zap, Cloud, Play, X, Crown, Tag, Quote,
+  Type,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { saveUpload, listUploads, deleteUpload } from "@/lib/db/projects";
@@ -97,6 +98,19 @@ const ELEMENTS = [
 ];
 const CATEGORIES = ["Shapes", "Lines & arrows", "Icons", "Stickers"];
 
+// Text presets. Each maps to the existing controller.addText(initial, opts),
+// which creates an editable IText, centers + selects it (so PropertiesPanel can
+// edit it immediately) and triggers autosave via the canvas sync. `preview` is
+// how the button renders the style; `keywords` broadens search matches.
+const TEXT_PRESETS = [
+  { id: "heading", label: "Add a heading", initial: "Heading", preview: "text-xl font-bold", keywords: "text title",
+    opts: { fontSize: 72, fontWeight: "700", name: "Heading" } },
+  { id: "subheading", label: "Add a subheading", initial: "Subheading", preview: "text-base font-semibold", keywords: "text subtitle",
+    opts: { fontSize: 44, fontWeight: "600", name: "Subheading" } },
+  { id: "body", label: "Add body text", initial: "Your body text", preview: "text-sm font-normal", keywords: "text paragraph body",
+    opts: { fontSize: 26, fontWeight: "400", name: "Body text" } },
+];
+
 /** Read a file to a data URL, downscaling very large images for performance/storage. */
 async function fileToDataUrl(file, maxDim = 2000) {
   const dataUrl = await new Promise((res, rej) => {
@@ -141,6 +155,15 @@ export default function ElementsPanel({ controllerRef }) {
     const c = controllerRef.current;
     if (!c) return;
     c.addObject(el.make(), el.label);
+    setMobilePanel(null);
+  };
+
+  const addTextPreset = (preset) => {
+    const c = controllerRef.current;
+    if (!c) return;
+    // Reuses the existing editable-text path; the object is centered, selected
+    // (PropertiesPanel picks it up) and persisted by the normal autosave.
+    c.addText(preset.initial, preset.opts);
     setMobilePanel(null);
   };
 
@@ -190,6 +213,9 @@ export default function ElementsPanel({ controllerRef }) {
 
   const q = query.trim().toLowerCase();
   const filtered = q ? ELEMENTS.filter((el) => el.label.toLowerCase().includes(q) || el.cat.toLowerCase().includes(q)) : ELEMENTS;
+  const textItems = q
+    ? TEXT_PRESETS.filter((t) => t.label.toLowerCase().includes(q) || t.keywords.includes(q))
+    : TEXT_PRESETS;
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
@@ -203,6 +229,27 @@ export default function ElementsPanel({ controllerRef }) {
           className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-8 pr-2 text-sm outline-none focus:border-brand-400"
         />
       </div>
+
+      {/* Text */}
+      {textItems.length > 0 && (
+        <div>
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Text</h2>
+          <div className="flex flex-col gap-2">
+            {textItems.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => addTextPreset(t)}
+                title={t.label}
+                className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-slate-700 transition hover:border-brand-500 hover:text-brand-700 hover:shadow-sm"
+              >
+                <span className={t.preview}>{t.label}</span>
+                <Type size={16} className="shrink-0 text-slate-400" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Elements by category */}
       {CATEGORIES.map((cat) => {
@@ -228,7 +275,7 @@ export default function ElementsPanel({ controllerRef }) {
           </div>
         );
       })}
-      {q && filtered.length === 0 && (
+      {q && filtered.length === 0 && textItems.length === 0 && (
         <p className="text-xs text-slate-400">No elements match “{query}”.</p>
       )}
 
