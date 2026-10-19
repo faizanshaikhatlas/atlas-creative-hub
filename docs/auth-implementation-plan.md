@@ -163,11 +163,34 @@ item (gate moves from signup-time to approval-time). Owner promotion of
   (Pending/Approved/Rejected/Disabled) with Approve/Reject/Disable/Enable + role actions, a pending
   count badge, search, and status filters. Admins are governed by role+disable (no Approve/Reject on
   them); you can't act on your own row. Anon PATCH `{status}` → 403, `/admin` → 307 (confirmed live).
-- [ ] v2-P4 — Google OAuth: `signInWithOAuth`, login button, pending-by-default; Google Cloud +
-  Supabase provider config docs.
-- [ ] v2-P5 — Notifications: in-app pending badge/count now; documented Edge-Function email digest
-  as the safe upgrade.
-- [ ] v2-P6 — Verification: build + security tests + session-revocation test; manual-config report.
+- [x] **v2-P4 — Google OAuth** (build passes; login renders button): `signInWithOAuth('google', next)`
+  added to AuthProvider (returns to the existing `/auth/callback` PKCE route; validated same-origin
+  next); "Continue with Google" button + approval note on `/login`; `AccountMenu` shows a Pending/No-access
+  pill and `/account` shows Status + Sign-in method + a pending/rejected/disabled notice. New Google
+  users land `provider='google'`, `status='pending'` (0009 trigger) → gated by RLS + requireApproved
+  until an admin approves. Config documented in `docs/google-oauth-setup.md` (Google Cloud OAuth
+  client, Supabase provider + redirect allow-list, signups-ON for the approval-gate model, browser
+  verification). MANUAL: owner must enable the Google provider in Supabase (until then the button
+  errors) and add redirect URLs.
+- [x] **v2-P5 — Approval notifications** (build passes; anon gating verified): admin-only
+  `GET /api/admin/pending-count` (returns only an integer — no private data; `requireAdmin`),
+  surfaced as an amber count badge on the header **Admin** link (fetched only for admins) in
+  addition to the existing `/admin` pending badge + filter. No app mail backend exists, so the safe
+  practical mechanism is these in-app admin-only signals; the email-digest upgrade (Supabase Edge
+  Function + transactional provider, keys server-side only, admins-only, data-minimal) is documented
+  in `docs/approval-notifications.md`. Verified: anon → 403; current pending count = 0.
+- [x] **v2-P6 — Verification & integration** (complete): build ✓; advisors clean (only invitations
+  deny-all INFO + leaked-password WARN); anon matrix — guest routes 200, `/admin`+`/account` 307,
+  all admin APIs (users GET/PATCH-status, invitations GET/POST, pending-count) 403, `/api/me`
+  `{authenticated:false}`, validate no-token `{valid:false}`; anon Data API denied (42501) with zero
+  anon grants; `designs` bucket private; all 4 table + 4 storage policies carry the membership gate.
+  Gate logic proven for every state (rolled back): user pending/rejected=blocked, approved=allowed,
+  approved+disabled=blocked; admin default/rejected=allowed (role override), admin+disabled=blocked.
+  Session revocation confirmed LIVE on the owner-disabled `tech@` account (is_active_member=false,
+  0 rows) — RLS denies on next request; disable also applies the Supabase Auth ban (session dies on
+  refresh). Note: live data reflects the owner's own dashboard testing (a 3rd approved account; tech@
+  rejected+disabled) — left untouched. MANUAL remaining: enable Google provider + redirect URLs;
+  leaked-password protection; confirm signups ON (approval-gate); Vercel prod env parity.
 
 ---
 

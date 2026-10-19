@@ -16,6 +16,7 @@ const AuthContext = createContext({
   signInWithPassword: async () => {},
   signUpWithPassword: async () => {},
   signInWithMagicLink: async () => {},
+  signInWithOAuth: async () => {},
   resetPasswordForEmail: async () => {},
   updatePassword: async () => {},
   signOut: async () => {},
@@ -87,6 +88,25 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   }, []);
 
+  const signInWithOAuth = useCallback(async (provider = "google", next = "/") => {
+    const supabase = getSupabase();
+    if (!supabase) throw new Error("Cloud is not configured.");
+    // Land on the same PKCE callback the email flows use; it exchanges the code
+    // for a cookie session and forwards to `next`. OAuth sign-in NEVER grants app
+    // access by itself — a new Google user is provisioned 'pending' (DB trigger)
+    // and stays gated by RLS + requireApproved until an admin approves them.
+    const safe = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+    const redirectTo =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(safe)}`
+        : undefined;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo },
+    });
+    if (error) throw error;
+  }, []);
+
   const resetPasswordForEmail = useCallback(async (email) => {
     const supabase = getSupabase();
     if (!supabase) throw new Error("Cloud is not configured.");
@@ -122,6 +142,7 @@ export function AuthProvider({ children }) {
     signInWithPassword,
     signUpWithPassword,
     signInWithMagicLink,
+    signInWithOAuth,
     resetPasswordForEmail,
     updatePassword,
     signOut,

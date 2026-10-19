@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, Shield } from "lucide-react";
-import { getSessionProfile } from "@/lib/auth/roles";
+import { ArrowLeft, Shield, Clock } from "lucide-react";
+import { getSessionProfile, isActiveMember } from "@/lib/auth/roles";
 
 // Authenticated-only account route. Server-gated (defense-in-depth with the
 // middleware redirect). Signed-out visitors go to /login?next=/account.
@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
 export default async function AccountPage() {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login?next=/account");
+
+  const active = isActiveMember(profile);
+  const statusLabel = profile.disabled ? "disabled" : profile.status || "pending";
 
   return (
     <div className="min-h-dvh bg-slate-50">
@@ -24,9 +27,26 @@ export default async function AccountPage() {
       </header>
 
       <main className="mx-auto max-w-[800px] px-4 py-8 sm:px-6">
+        {!active && (
+          <div className="mb-5 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <Clock size={18} className="mt-0.5 shrink-0 text-amber-600" />
+            <div className="text-sm text-amber-800">
+              <p className="font-semibold">
+                {statusLabel === "rejected" ? "Access not granted" : statusLabel === "disabled" ? "Account disabled" : "Awaiting approval"}
+              </p>
+              <p className="mt-1 text-amber-700">
+                {statusLabel === "rejected" || statusLabel === "disabled"
+                  ? "Your account can’t use cloud features. Your local designs on this device are unaffected."
+                  : "An administrator needs to approve your account before cloud backup, sync, and your cloud designs unlock. You can keep working locally in the meantime."}
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <dl className="space-y-4">
             <Row label="Email" value={profile.email} />
+            <Row label="Sign-in method" value={<span className="capitalize">{profile.provider || "email"}</span>} />
             <Row
               label="Role"
               value={
@@ -36,12 +56,8 @@ export default async function AccountPage() {
               }
             />
             <Row
-              label="Access"
-              value={
-                profile.disabled
-                  ? <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-700">disabled</span>
-                  : <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">active</span>
-              }
+              label="Status"
+              value={<StatusBadge status={statusLabel} />}
             />
           </dl>
 
@@ -62,6 +78,16 @@ export default async function AccountPage() {
       </main>
     </div>
   );
+}
+
+function StatusBadge({ status }) {
+  const map = {
+    pending: "bg-amber-100 text-amber-700",
+    approved: "bg-emerald-100 text-emerald-700",
+    rejected: "bg-slate-200 text-slate-600",
+    disabled: "bg-rose-100 text-rose-700",
+  };
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${map[status] || map.pending}`}>{status}</span>;
 }
 
 function Row({ label, value }) {
