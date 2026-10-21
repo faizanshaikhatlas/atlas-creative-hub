@@ -16,9 +16,8 @@ const AuthContext = createContext({
   session: null,
   dbScope: "guest",
   signInWithPassword: async () => {},
-  signUpWithPassword: async () => {},
+  signUpWithEmail: async () => {},
   signInWithMagicLink: async () => {},
-  signInWithOAuth: async () => {},
   resetPasswordForEmail: async () => {},
   updatePassword: async () => {},
   signOut: async () => {},
@@ -71,27 +70,30 @@ export function AuthProvider({ children }) {
     if (error) throw error;
   }, []);
 
-  const signUpWithPassword = useCallback(async (email, password) => {
+  // Email-first public signup. We DON'T ask the user to invent a password here:
+  // signInWithOtp with shouldCreateUser creates the (unconfirmed, password-less)
+  // account and emails a verification link. Clicking it hits /auth/callback,
+  // which exchanges the code for a session and forwards to the password-setup
+  // page (/update-password?setup=1) where the user sets their own password.
+  //
+  // This is the supported Supabase email-first flow — no insecure placeholder
+  // password or custom token. The account is created `pending` by the DB trigger
+  // (handle_new_user); email verification is NOT approval. An existing email just
+  // receives a sign-in link instead (uniform response → no account enumeration).
+  const signUpWithEmail = useCallback(async (email) => {
     const supabase = getSupabase();
     if (!supabase) throw new Error("Cloud is not configured.");
-    const { data, error } = await supabase.auth.signUp({
+    const { error } = await supabase.auth.signInWithOtp({
       email,
-      password,
       options: {
+        shouldCreateUser: true,
         emailRedirectTo:
-          typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+          typeof window !== "undefined"
+            ? `${window.location.origin}/auth/callback?next=${encodeURIComponent("/update-password?setup=1")}`
+            : undefined,
       },
     });
     if (error) throw error;
-    // Anti-enumeration: signing up with an ALREADY-registered email returns a
-    // success-shaped 200 (no error, obfuscated user) and sends NO email. The
-    // tell is an empty identities array. Surface it so the UI doesn't show a
-    // misleading "check your email" when nothing was sent.
-    if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-      return { alreadyRegistered: true, needsEmailConfirmation: false };
-    }
-    // When email confirmation is required, no session is returned yet.
-    return { alreadyRegistered: false, needsEmailConfirmation: !data?.session };
   }, []);
 
   const signInWithMagicLink = useCallback(async (email) => {
@@ -107,25 +109,6 @@ export function AuthProvider({ children }) {
         emailRedirectTo:
           typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
       },
-    });
-    if (error) throw error;
-  }, []);
-
-  const signInWithOAuth = useCallback(async (provider = "google", next = "/") => {
-    const supabase = getSupabase();
-    if (!supabase) throw new Error("Cloud is not configured.");
-    // Land on the same PKCE callback the email flows use; it exchanges the code
-    // for a cookie session and forwards to `next`. OAuth sign-in NEVER grants app
-    // access by itself — a new Google user is provisioned 'pending' (DB trigger)
-    // and stays gated by RLS + requireApproved until an admin approves them.
-    const safe = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
-    const redirectTo =
-      typeof window !== "undefined"
-        ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(safe)}`
-        : undefined;
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo },
     });
     if (error) throw error;
   }, []);
@@ -164,9 +147,8 @@ export function AuthProvider({ children }) {
     dbScope,
     user: session?.user ?? null,
     signInWithPassword,
-    signUpWithPassword,
+    signUpWithEmail,
     signInWithMagicLink,
-    signInWithOAuth,
     resetPasswordForEmail,
     updatePassword,
     signOut,
