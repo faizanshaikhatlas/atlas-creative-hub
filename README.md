@@ -251,4 +251,4 @@ Two Playwright suites drive the running dev server and assert real canvas state:
   is a later enhancement). Nested group editing is single-level.
 - React Strict Mode is intentionally disabled (`next.config.mjs`) because Fabric
   manages its own `<canvas>` DOM wrapper imperatively and Strict Mode's dev-only
-  double-mount can leave a detached wrapper; production is unaffected.
+  double-mount can leave a detached wrapper; production is unaffected..
