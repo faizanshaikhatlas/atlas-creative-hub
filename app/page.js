@@ -12,7 +12,7 @@ import {
   setProjectTags,
   SIZE_PRESETS,
 } from "@/lib/db/projects";
-import { classifySyncStatus, listProjectSyncStates, deleteDesign, isOwnedByUser, syncPull, pushProjectSafe } from "@/lib/sync/sync";
+import { classifySyncStatus, listProjectSyncStates, deleteDesign, isOwnedByUser, syncPull, reconcileOnLogin } from "@/lib/sync/sync";
 import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
 import AccountMenu from "@/components/auth/AccountMenu";
@@ -88,22 +88,25 @@ export default function HomePage() {
       setSyncState("syncing");
       let pullOk = true;
       try {
-        await syncPull(userId); // cloud → local cache
+        await syncPull(userId); // cloud → local cache (tombstone-aware)
       } catch {
         pullOk = false;
       }
-      const { list, states } = await loadLocal();
-      // Auto-push owned designs whose local edits aren't in the cloud yet.
-      let pushFailed = false;
-      const dirty = list.filter(
-        (p) => isOwnedByUser(p, userId) && ["needed", "failed"].includes(classifySyncStatus(p, states[p.id], { configured, userId }))
-      );
-      for (const p of dirty) {
-        const res = await pushProjectSafe(p.id, userId);
-        if (res.status !== "ok" && res.status !== "skipped") pushFailed = true;
+      // Adopt in-scope designs and push everything owned-but-unconfirmed, so a
+      // design that only lives in this browser is persisted to the account.
+      let reconcileOk = true;
+      try {
+        await reconcileOnLogin(userId);
+      } catch {
+        reconcileOk = false;
       }
-      if (dirty.length) await loadLocal(); // refresh badges after pushes
-      setSyncState(pullOk && !pushFailed ? "synced" : "failed");
+      const { list, states } = await loadLocal();
+      // Honest status: "Synced" ONLY when every owned design is confirmed in the
+      // cloud (never green while an owned design is still local-only/failed).
+      const ownedUnconfirmed = list.filter(
+        (p) => isOwnedByUser(p, userId) && classifySyncStatus(p, states[p.id], { configured, userId }) !== "synced"
+      );
+      setSyncState(pullOk && reconcileOk && ownedUnconfirmed.length === 0 ? "synced" : "failed");
     } catch (err) {
       console.error(err);
       setError("Local storage (IndexedDB) is unavailable in this browser. Designs cannot be saved.");
@@ -127,6 +130,13 @@ export default function HomePage() {
   }, [dbScope, configured, authLoading, active, online]);
 
   async function quickCreate({ type, width, height } = {}) {
+    // Scope-race guard: don't create until the session (and thus the account
+    // scope) has resolved, so a signed-in user's new design can't land in the
+    // guest database with the wrong ownerScope.
+    if (configured && authLoading) {
+      setError("Finishing sign-in… please try again in a moment.");
+      return;
+    }
     setShowNew(false);
     setCreating(true);
     setError(null);

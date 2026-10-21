@@ -293,6 +293,12 @@ export default function Editor({ project }) {
 
   useEffect(() => () => { if (cloudPushTimer.current) clearTimeout(cloudPushTimer.current); }, []);
 
+  // Persist once approval resolves: a design created or edited before /api/me
+  // returned active=true would otherwise never be pushed. Idempotent (upsert).
+  useEffect(() => {
+    if (configured && user && active) scheduleCloudPush();
+  }, [active, configured, user, scheduleCloudPush]);
+
   const doSave = useCallback(async () => {
     const c = controllerRef.current;
     if (!c) return;
