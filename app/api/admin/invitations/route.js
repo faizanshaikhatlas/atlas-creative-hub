@@ -17,6 +17,17 @@ function inviteUrlFor(request, token) {
   return `${origin}/invite/accept?token=${token}`;
 }
 
+// Invitation lifetime policy (server-authoritative; the UI only suggests a value).
+const DEFAULT_DAYS = 2; // 48 hours
+const MAX_DAYS = 30; // guard against excessively long-lived tokens
+
+/** Clamp a client-supplied expiry (days) to the allowed range; default when invalid. */
+function normalizeDays(input) {
+  const n = Number(input);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_DAYS;
+  return Math.min(MAX_DAYS, Math.max(1, Math.floor(n)));
+}
+
 /** GET /api/admin/invitations → list all invitations (admin only). */
 export async function GET() {
   if (!isAdminConfigured()) return NextResponse.json({ error: "not_configured" }, { status: 503 });
@@ -45,16 +56,37 @@ export async function POST(request) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
   const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
-  const days = Math.min(90, Math.max(1, Number(body?.days) || 7));
+  const days = normalizeDays(body?.days);
   if (!email || !email.includes("@")) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
+  }
+
+  const svc = getAdminClient();
+  const nowIso = new Date().toISOString();
+
+  // Prevent multiple active (unaccepted, unrevoked, unexpired) invites for the
+  // same normalized email — the admin should revoke/delete or resend the existing
+  // one instead of minting duplicates.
+  const { data: active } = await svc
+    .from("invitations")
+    .select("id, expires_at")
+    .eq("email", email)
+    .is("accepted_at", null)
+    .is("revoked_at", null)
+    .gt("expires_at", nowIso)
+    .limit(1)
+    .maybeSingle();
+  if (active) {
+    return NextResponse.json(
+      { error: "An active invitation already exists for this email. Revoke or delete it, or use Resend, before creating another." },
+      { status: 409 }
+    );
   }
 
   const token = crypto.randomBytes(32).toString("base64url");
   const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
   const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
 
-  const svc = getAdminClient();
   const { error } = await svc.from("invitations").insert({
     email,
     token_hash: tokenHash,
@@ -77,4 +109,41 @@ export async function POST(request) {
     emailConfigured: isEmailConfigured(),
     emailSent: emailResult.sent === true,
   });
+}
+
+/**
+ * DELETE /api/admin/invitations { id } → remove a single invitation RECORD only
+ * (admin only). This is invitation-history cleanup and is deliberately decoupled
+ * from the user lifecycle:
+ *  - It touches ONLY the `invitations` table. It never deletes or disables a
+ *    Supabase Auth user, profile, project, or Storage file. (Account deletion is
+ *    a separate, explicitly-confirmed flow at DELETE /api/admin/users.)
+ *  - Deleting a PENDING invite invalidates its token immediately (the row is
+ *    gone, so acceptance/validation find nothing).
+ *  - Deleting an ACCEPTED invite leaves the activated user fully intact and able
+ *    to keep signing in.
+ */
+export async function DELETE(request) {
+  if (!isAdminConfigured()) return NextResponse.json({ error: "not_configured" }, { status: 503 });
+  if (!(await requireAdmin())) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+  const id = typeof body?.id === "string" ? body.id : "";
+  if (!id) return NextResponse.json({ error: "Missing invitation id." }, { status: 400 });
+
+  const svc = getAdminClient();
+  const { data, error } = await svc
+    .from("invitations")
+    .delete()
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (error) return NextResponse.json({ error: "Could not delete the invitation." }, { status: 500 });
+  if (!data) return NextResponse.json({ error: "Invitation not found." }, { status: 404 });
+  return NextResponse.json({ ok: true, deleted: true });
 }

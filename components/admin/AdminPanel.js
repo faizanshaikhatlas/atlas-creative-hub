@@ -69,7 +69,7 @@ export default function AdminPanel({ adminEmail }) {
 
 function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
   const [email, setEmail] = useState("");
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(2); // 2 days (48h) default — matches the server
   const [creating, setCreating] = useState(false);
   const [lastInvite, setLastInvite] = useState(null); // { email, inviteUrl, expiresAt, emailSent, emailConfigured }
   const [resending, setResending] = useState(false);
@@ -145,6 +145,28 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
     }
   }
 
+  // Delete the invitation RECORD only (history cleanup). Never touches the user
+  // account — the API enforces that. For a pending invite this also invalidates
+  // its token; for an accepted invite the activated user is unaffected.
+  async function deleteInvite(id) {
+    setErr(null);
+    setBusyId(id);
+    try {
+      const res = await fetch("/api/admin/invitations", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not delete the invitation.");
+      reload();
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <section>
       <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold text-slate-900">
@@ -163,7 +185,7 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
         <label>
           <span className="mb-1 block text-xs font-medium text-slate-500">Expires (days)</span>
           <input
-            type="number" min={1} max={90} value={days} onChange={(e) => setDays(e.target.value)}
+            type="number" min={1} max={30} value={days} onChange={(e) => setDays(e.target.value)}
             className="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-brand-500"
           />
         </label>
@@ -171,6 +193,10 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
           className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60">
           {creating ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />} Create invite
         </button>
+        <p className="w-full text-xs text-slate-400">
+          Invitation links expire in <strong>2 days (48 hours)</strong> by default (max 30). One active
+          invite per email.
+        </p>
       </form>
 
       {lastInvite && (
@@ -246,13 +272,23 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
                     <td className="px-4 py-2.5 text-slate-700">{inv.email}</td>
                     <td className="px-4 py-2.5"><StatusBadge status={status} /></td>
                     <td className="px-4 py-2.5 text-slate-500">{fmt(inv.expires_at)}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      {status === "pending" && (
-                        <button onClick={() => revoke(inv.id)} disabled={busyId === inv.id}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50">
-                          {busyId === inv.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Revoke
+                    <td className="px-4 py-2.5">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                        {status === "pending" && (
+                          <button onClick={() => revoke(inv.id)} disabled={busyId === inv.id}
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50">
+                            {busyId === inv.id ? <Loader2 size={13} className="animate-spin" /> : <Ban size={13} />} Revoke
+                          </button>
+                        )}
+                        <button
+                          onClick={() => deleteInvite(inv.id)}
+                          disabled={busyId === inv.id}
+                          title={status === "accepted" ? "Remove this invitation record. The user account is NOT affected." : "Delete this invitation record. The link will no longer work."}
+                          className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-50 disabled:opacity-50">
+                          {busyId === inv.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                          {status === "accepted" ? "Delete record" : "Delete"}
                         </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -261,6 +297,12 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
           </table>
         )}
       </div>
+      <p className="mt-2 text-[11px] text-slate-400">
+        <strong>Revoke</strong> instantly disables a pending link. <strong>Delete</strong> removes the
+        invitation record only — it never deletes or disables a user account. Manage activated users under
+        <span className="font-medium"> Users &amp; approvals</span> below. Statuses: Pending, Accepted,
+        Revoked, Expired — expired and revoked links can no longer be used.
+      </p>
     </section>
   );
 }
