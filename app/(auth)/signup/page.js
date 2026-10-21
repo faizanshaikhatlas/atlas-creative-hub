@@ -48,15 +48,21 @@ function PublicSignupForm() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [sent, setSent] = useState(false);
+  const [exists, setExists] = useState(false);
 
   async function onSubmit(e) {
     e.preventDefault();
     setErr(null);
+    setExists(false);
     if (password.length < 8) { setErr("Use at least 8 characters for your password."); return; }
     setBusy(true);
     try {
-      const { needsEmailConfirmation } = await signUpWithPassword(email, password);
-      if (needsEmailConfirmation) setSent(true);
+      const { needsEmailConfirmation, alreadyRegistered } = await signUpWithPassword(email, password);
+      // An existing account gets no email (anti-enumeration). Tell the user the
+      // truth instead of the "check your email" screen — they should sign in or
+      // reset their password rather than wait for a mail that will never arrive.
+      if (alreadyRegistered) setExists(true);
+      else if (needsEmailConfirmation) setSent(true);
       else { router.push("/"); router.refresh(); }
     } catch (e2) {
       setErr(e2?.message || "Sign-up failed.");
@@ -67,6 +73,26 @@ function PublicSignupForm() {
 
   if (!configured) {
     return <p className="text-sm text-slate-600">Cloud sign-up is not configured for this deployment.</p>;
+  }
+  if (exists) {
+    return (
+      <div className="text-center">
+        <ShieldCheck size={30} className="mx-auto text-brand-600" />
+        <h1 className="mt-3 text-lg font-bold text-slate-900">You already have an account</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          <span className="font-medium text-slate-700">{email}</span> is already registered, so no
+          confirmation email was sent.
+        </p>
+        <div className="mt-4 flex flex-col gap-2">
+          <Link href="/login" className="inline-flex w-full items-center justify-center rounded-lg bg-brand-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-700">
+            Sign in
+          </Link>
+          <Link href="/forgot-password" className="text-sm font-medium text-brand-600 hover:underline">
+            Forgot your password?
+          </Link>
+        </div>
+      </div>
+    );
   }
   if (sent) {
     return (

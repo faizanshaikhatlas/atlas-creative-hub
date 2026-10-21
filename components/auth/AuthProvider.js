@@ -67,8 +67,15 @@ export function AuthProvider({ children }) {
       },
     });
     if (error) throw error;
+    // Anti-enumeration: signing up with an ALREADY-registered email returns a
+    // success-shaped 200 (no error, obfuscated user) and sends NO email. The
+    // tell is an empty identities array. Surface it so the UI doesn't show a
+    // misleading "check your email" when nothing was sent.
+    if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      return { alreadyRegistered: true, needsEmailConfirmation: false };
+    }
     // When email confirmation is required, no session is returned yet.
-    return { needsEmailConfirmation: !data?.session };
+    return { alreadyRegistered: false, needsEmailConfirmation: !data?.session };
   }, []);
 
   const signInWithMagicLink = useCallback(async (email) => {
