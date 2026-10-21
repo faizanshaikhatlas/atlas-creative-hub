@@ -7,7 +7,6 @@ import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVert
 import {
   listProjects,
   createProject,
-  deleteProject,
   duplicateProject,
   renameProject,
   setProjectTags,
@@ -15,7 +14,7 @@ import {
   importLegacyDesigns,
   SIZE_PRESETS,
 } from "@/lib/db/projects";
-import { classifySyncStatus, listProjectSyncStates } from "@/lib/sync/sync";
+import { classifySyncStatus, listProjectSyncStates, deleteDesign, isOwnedByUser } from "@/lib/sync/sync";
 import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
 import AccountMenu from "@/components/auth/AccountMenu";
@@ -63,6 +62,7 @@ export default function HomePage() {
   const [legacyDismissed, setLegacyDismissed] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importMsg, setImportMsg] = useState(null);
+  const [deleteMsg, setDeleteMsg] = useState(null); // { tone: "ok"|"warn", text }
 
   const userId = user?.id ?? null;
 
@@ -138,10 +138,26 @@ export default function HomePage() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!window.confirm("Delete this design? This cannot be undone.")) return;
-    try { await deleteProject(id); refresh(); }
-    catch (err) { console.error(err); setError("Could not delete the design."); }
+  async function handleDelete(p) {
+    const owned = isOwnedByUser(p, userId);
+    const name = p.name || "this design";
+    const scopeMsg = owned
+      ? `Delete “${name}”? This permanently removes it from this device and your cloud account. This cannot be undone.`
+      : `Delete “${name}”? This removes it from this device. It isn’t saved to any cloud account. This cannot be undone.`;
+    if (!window.confirm(scopeMsg)) return;
+    setDeleteMsg(null);
+    try {
+      const res = await deleteDesign(p, { userId, configured });
+      await refresh();
+      if (res.cloudPending) {
+        setDeleteMsg({ tone: "warn", text: `“${name}” was removed from this device. Its cloud copy couldn’t be deleted yet — it will retry on your next sync.` });
+      } else if (res.scope === "cloud") {
+        setDeleteMsg({ tone: "ok", text: `“${name}” was permanently deleted from this device and your cloud account.` });
+      }
+    } catch (err) {
+      console.error(err);
+      setError("Could not delete the design.");
+    }
   }
 
   async function handleDuplicate(id) {
@@ -254,6 +270,16 @@ export default function HomePage() {
         )}
         {importMsg && (
           <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{importMsg}</div>
+        )}
+        {deleteMsg && (
+          <div className={
+            "mb-6 rounded-lg border px-4 py-3 text-sm " +
+            (deleteMsg.tone === "warn"
+              ? "border-amber-200 bg-amber-50 text-amber-800"
+              : "border-emerald-200 bg-emerald-50 text-emerald-800")
+          }>
+            {deleteMsg.text}
+          </div>
         )}
 
         {/* Create a design — popular formats */}
@@ -585,7 +611,7 @@ function DesignCard({ p, status = "local", onOpen, onRename, onDuplicate, onDele
               <button type="button" role="menuitem" onClick={startTags} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
                 <Tag size={14} /> Edit tags
               </button>
-              <button type="button" role="menuitem" onClick={() => { setMenu(false); onDelete(p.id); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50">
+              <button type="button" role="menuitem" onClick={() => { setMenu(false); onDelete(p); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50">
                 <Trash2 size={14} /> Delete
               </button>
             </div>,
