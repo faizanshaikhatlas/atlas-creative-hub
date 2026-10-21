@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, LogIn } from "lucide-react";
+import { Plus, Trash2, Loader2, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, LogIn } from "lucide-react";
 import { SIZE_PRESETS } from "@/lib/db/projects";
 import { apiListProjects, apiCreateProject, apiDeleteProject, apiGetProject, apiUpdateProject } from "@/lib/designs/client";
 import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
 import AccountMenu from "@/components/auth/AccountMenu";
+import DesignThumb from "@/components/designs/DesignThumb";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 // Representative photo per theme for the browse tiles (already in /public).
@@ -313,7 +314,7 @@ export default function HomePage() {
               <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {visible.map((p) => (
                   <li key={p.id}>
-                    <DesignCard p={p} onOpen={(id) => router.push(`/editor/${id}`)} onRename={handleRename} onDuplicate={handleDuplicate} onDelete={handleDelete} />
+                    <DesignCard p={p} userId={userId} onOpen={(id) => router.push(`/editor/${id}`)} onRename={handleRename} onDuplicate={handleDuplicate} onDelete={handleDelete} />
                   </li>
                 ))}
               </ul>
@@ -327,7 +328,7 @@ export default function HomePage() {
   );
 }
 
-function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
+function DesignCard({ p, userId, onOpen, onRename, onDuplicate, onDelete }) {
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(p.name || "");
@@ -389,8 +390,8 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
 
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:border-brand-400 hover:shadow-md">
-      <button type="button" onClick={() => onOpen(p.id)} className="relative block aspect-video w-full overflow-hidden bg-slate-100">
-        <div className="flex h-full w-full items-center justify-center text-slate-300"><ImageOff size={26} /></div>
+      <button type="button" onClick={() => onOpen(p.id)} className="relative block aspect-video w-full overflow-hidden bg-slate-50">
+        <DesignThumb project={p} userId={userId} />
       </button>
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         <div className="min-w-0 flex-1">
