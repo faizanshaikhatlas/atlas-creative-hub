@@ -28,7 +28,7 @@ export default function AccountMenu() {
   useEffect(() => {
     let active = true;
     if (!user) { setIsAdmin(false); setMe(null); return; }
-    fetch("/api/me")
+    fetch("/api/me", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => { if (active) { setIsAdmin(d?.role === "admin" && !d?.disabled); setMe(d); } })
       .catch(() => { if (active) { setIsAdmin(false); setMe(null); } });

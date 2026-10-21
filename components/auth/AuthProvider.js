@@ -34,9 +34,11 @@ export function AuthProvider({ children }) {
   // this and re-query local designs whenever it changes.
   const [dbScope, setScopeState] = useState(scopeForUser(null));
   // Authoritative approval state (server-resolved via /api/me; never inferred on
-  // the client). null = unknown/loading; true only for an approved, non-disabled
-  // member. Automatic cloud sync is gated on this (the DB RLS enforces it too).
-  const [active, setActive] = useState(false);
+  // the client). Tri-state: null = UNKNOWN (still loading, or the request failed)
+  // — callers must NOT treat this as pending and must NOT grant edit permission;
+  // true = approved, non-disabled member; false = CONFIRMED not approved. The DB
+  // RLS enforces the real rule regardless.
+  const [active, setActive] = useState(null);
   // Connectivity, so sync UIs can show an honest "Offline" state.
   const [online, setOnline] = useState(true);
 
@@ -51,14 +53,18 @@ export function AuthProvider({ children }) {
   }, [session?.user?.id]);
 
   // Resolve approval from the authoritative server endpoint whenever the user
-  // changes. Signed-out → not active.
+  // changes. Signed-out → confirmed not active (false). Signed-in → fetch fresh
+  // (never cached, so a stale "pending" from before approval can't persist). A
+  // failed/errored fetch → UNKNOWN (null), never a false "pending".
   useEffect(() => {
-    if (!configured || !session?.user) { setActive(false); return; }
+    if (!configured) { setActive(false); return; }
+    if (!session?.user) { setActive(false); return; }
     let alive = true;
-    fetch("/api/me")
-      .then((r) => r.json())
+    setActive(null); // unknown while we check
+    fetch("/api/me", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`me_${r.status}`))))
       .then((d) => { if (alive) setActive(d?.active === true); })
-      .catch(() => { if (alive) setActive(false); });
+      .catch(() => { if (alive) setActive(null); });
     return () => { alive = false; };
   }, [configured, session?.user?.id]);
 

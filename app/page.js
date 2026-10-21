@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Download, LogIn } from "lucide-react";
+import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, LogIn } from "lucide-react";
 import { SIZE_PRESETS } from "@/lib/db/projects";
 import { apiListProjects, apiCreateProject, apiDeleteProject, apiGetProject, apiUpdateProject } from "@/lib/designs/client";
 import { THEMES } from "@/lib/template-catalog/formats";
@@ -52,14 +52,18 @@ export default function HomePage() {
   const [notice, setNotice] = useState(null); // transient success/info
 
   const userId = user?.id ?? null;
-  const canEdit = configured && !!userId && active; // approved + signed in
+  const canEdit = configured && !!userId && active === true; // approved + signed in
 
   // Personal designs come ONLY from the authenticated user's cloud account.
   async function load() {
     setError(null);
     if (!configured) { setProjects([]); setListState("ok"); return; }
     if (!userId) { setProjects([]); setListState("signedout"); return; }
-    if (!active) { setProjects([]); setListState("pending"); return; }
+    // active is tri-state: null = UNKNOWN (approval not yet resolved, or /api/me
+    // failed) → show a neutral loading state, NEVER the pending banner. Only a
+    // CONFIRMED false shows "awaiting approval".
+    if (active === null) { setListState("loading"); return; }
+    if (active === false) { setProjects([]); setListState("pending"); return; }
     setListState("loading");
     try {
       const rows = await apiListProjects();
@@ -89,7 +93,13 @@ export default function HomePage() {
   async function quickCreate({ type, width, height } = {}) {
     if (!configured) { setError("Cloud is not configured for this deployment."); return; }
     if (!userId) { setShowNew(false); requireAuthThen("/"); return; }
-    if (!active) { setShowNew(false); setError("Your account is awaiting administrator approval before you can create designs."); return; }
+    if (active !== true) {
+      setShowNew(false);
+      setError(active === false
+        ? "Your account is awaiting administrator approval before you can create designs."
+        : "Still checking your account — please try again in a moment.");
+      return;
+    }
     setShowNew(false);
     setCreating(true);
     setError(null);
@@ -259,12 +269,6 @@ export default function HomePage() {
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold text-slate-900">Your designs</h2>
             <div className="flex items-center gap-2">
-              {canEdit && (
-                <button type="button" onClick={() => router.push("/recover")} title="Import designs saved in this browser into your account"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:border-brand-400">
-                  <Download size={14} /> Recover device designs
-                </button>
-              )}
               {listState === "ok" && projects && projects.length > 0 && (
                 <>
                   <div className="relative">

@@ -291,10 +291,12 @@ export default function Editor({ project }) {
     setPages(captured);
 
     const a = authRef.current;
-    if (!a.configured || !a.user || !a.active) {
-      // Editing requires an approved account; the route is auth-gated, so this is
-      // only a transient state. Never claim a save we didn't make.
-      store.setCloudStatus(a.user ? "failed" : "offline");
+    if (!a.configured || !a.user) { store.setCloudStatus("offline"); return; }
+    if (a.active !== true) {
+      // active === false → not approved (can't persist); null → approval still
+      // resolving, so skip quietly and let the next change retry. Never claim a
+      // save we didn't make, and never show a false failure while merely unknown.
+      if (a.active === false) store.setCloudStatus("failed");
       return;
     }
 

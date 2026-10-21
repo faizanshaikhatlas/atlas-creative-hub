@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Eye, Sparkles, ImageOff } from "lucide-react";
-import { FORMATS, THEME_BY_ID, renderTemplateThumbnail, buildTemplateDesign } from "@/lib/template-catalog";
+import { FORMATS, renderTemplateThumbnail, buildTemplateDesign } from "@/lib/template-catalog";
 import { apiCreateProject } from "@/lib/designs/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 
@@ -15,7 +15,8 @@ export default function TemplateCard({ template, onPreview, onError }) {
   const [failed, setFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const fmt = FORMATS[template.format];
-  const theme = THEME_BY_ID[template.theme];
+  // Real original dimensions from the template's format metadata (never invented).
+  const dims = fmt ? `${fmt.width} × ${fmt.height}` : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -51,36 +52,40 @@ export default function TemplateCard({ template, onPreview, onError }) {
 
   return (
     <div ref={ref} className="group flex flex-col">
-      <div
-        className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-100 shadow-sm transition group-hover:border-brand-300 group-hover:shadow-md"
-        style={{ aspectRatio: `${fmt.width} / ${fmt.height}` }}
-      >
+      {/* Uniform 4:3 preview container for EVERY format. The design is scaled
+          with object-contain (never cropped/stretched) and centred on a neutral
+          background, so portrait/square/landscape templates all occupy equal cards. */}
+      <div className="relative w-full aspect-[4/3] overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-sm transition group-hover:border-brand-300 group-hover:shadow-md group-focus-within:border-brand-300">
         {src ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt={template.title} className="h-full w-full object-cover" loading="lazy" />
+          <img src={src} alt={template.title} className="absolute inset-0 h-full w-full object-contain p-2" loading="lazy" />
         ) : failed ? (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-slate-300" style={{ background: theme?.swatch?.[0] }}>
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-slate-300">
             <ImageOff size={22} />
           </div>
         ) : (
           <div className="h-full w-full animate-pulse bg-gradient-to-br from-slate-100 to-slate-200" />
         )}
 
-        <div className="pointer-events-none absolute inset-0 hidden items-center justify-center gap-2 bg-slate-900/45 opacity-0 transition group-hover:opacity-100 sm:flex">
+        {/* Canva-style hover/focus overlay (desktop + keyboard). The design stays
+            visible behind a subtle dim; touch devices use the buttons below. */}
+        <div className="pointer-events-none absolute inset-0 hidden items-center justify-center gap-2 bg-slate-900/45 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 sm:flex">
           <button type="button" onClick={() => onPreview?.(template)}
-            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow hover:bg-white">
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow transition hover:bg-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white">
             <Eye size={14} /> Preview
           </button>
           <button type="button" onClick={use} disabled={creating}
-            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-brand-700 disabled:opacity-60">
-            {creating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Use
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow transition hover:bg-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-300 disabled:opacity-60">
+            {creating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Use template
           </button>
         </div>
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-2 px-0.5">
+      <div className="mt-2 px-0.5">
         <p className="truncate text-[13px] font-medium text-slate-700" title={template.title}>{template.title}</p>
-        <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{fmt.short}</span>
+        {fmt && (
+          <p className="mt-0.5 text-right text-[11px] text-slate-400">{fmt.label} · {dims}</p>
+        )}
       </div>
 
       <div className="mt-1.5 flex gap-2 sm:hidden">
