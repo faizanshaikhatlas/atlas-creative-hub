@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { getSupabase, isSupabaseConfigured } from "@/lib/supabase/client";
+import { setDbScope, scopeForUser } from "@/lib/db/projects";
 
 /**
  * Auth context for optional cloud features. When Supabase is not configured the
@@ -13,6 +14,7 @@ const AuthContext = createContext({
   loading: false,
   user: null,
   session: null,
+  dbScope: "guest",
   signInWithPassword: async () => {},
   signUpWithPassword: async () => {},
   signInWithMagicLink: async () => {},
@@ -26,6 +28,20 @@ export function AuthProvider({ children }) {
   const configured = isSupabaseConfigured();
   const [loading, setLoading] = useState(configured);
   const [session, setSession] = useState(null);
+  // The local-storage scope follows the authenticated identity. "guest" when
+  // signed out; "u-<uid>" when signed in. Consumers (e.g. the dashboard) read
+  // this and re-query local designs whenever it changes.
+  const [dbScope, setScopeState] = useState(scopeForUser(null));
+
+  // Keep the local DB namespace in lock-step with auth: sign-in, sign-out,
+  // account switch, and session restore all funnel through `session.user.id`.
+  // We set the module-level scope synchronously (so the next local query already
+  // targets the right database) and mirror it into state to re-render consumers.
+  useEffect(() => {
+    const scope = scopeForUser(session?.user?.id ?? null);
+    setDbScope(scope);
+    setScopeState(scope);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     if (!configured) return;
@@ -145,6 +161,7 @@ export function AuthProvider({ children }) {
     configured,
     loading,
     session,
+    dbScope,
     user: session?.user ?? null,
     signInWithPassword,
     signUpWithPassword,

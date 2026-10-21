@@ -29,6 +29,10 @@ export default function CloudSync({ onSynced }) {
   // client). null = unknown/loading. The DB RLS enforces the same rule anyway.
   const [me, setMe] = useState(null);
   const ref = useRef(null);
+  // When the user signs out this component unmounts; guard against a late sync
+  // promise resolving and touching state after that.
+  const aliveRef = useRef(true);
+  useEffect(() => () => { aliveRef.current = false; }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -59,17 +63,26 @@ export default function CloudSync({ onSynced }) {
     setProgress(null);
     try {
       const push = await syncPushAll(user.id, {
-        onProgress: ({ done, total }) => setProgress({ done, total }),
+        onProgress: ({ done, total }) => { if (aliveRef.current) setProgress({ done, total }); },
       });
       const pull = await syncPull(user.id);
+      if (!aliveRef.current) return; // signed out mid-sync
       const conflicts = [...new Set([...(push.conflicts || []), ...(pull.conflicts || [])])];
-      setResult({ pushed: push.pushed, pulled: pull.pulled, conflicts: conflicts.length });
+      setResult({
+        pushed: push.pushed,
+        pulled: pull.pulled,
+        skipped: push.skipped || 0,
+        failed: push.failed || 0,
+        conflicts: conflicts.length,
+      });
       onSynced?.();
     } catch (e) {
-      setErr(e?.message || "Sync failed.");
+      if (aliveRef.current) setErr(e?.message || "Sync failed.");
     } finally {
-      setBusy(false);
-      setProgress(null);
+      if (aliveRef.current) {
+        setBusy(false);
+        setProgress(null);
+      }
     }
   }
 
@@ -129,6 +142,16 @@ export default function CloudSync({ onSynced }) {
                   <p className="flex items-center gap-1.5 text-emerald-700">
                     <Check size={13} /> Pushed {result.pushed}, pulled {result.pulled}.
                   </p>
+                  {result.failed > 0 && (
+                    <p className="flex items-center gap-1.5 text-rose-600">
+                      <AlertTriangle size={13} /> {result.failed} design(s) failed to upload — they’re marked “Sync failed”; try again.
+                    </p>
+                  )}
+                  {result.skipped > 0 && (
+                    <p className="flex items-center gap-1.5 text-slate-500">
+                      <AlertTriangle size={13} /> {result.skipped} design(s) skipped — not owned by this account.
+                    </p>
+                  )}
                   {result.conflicts > 0 && (
                     <p className="flex items-center gap-1.5 text-amber-700">
                       <AlertTriangle size={13} /> {result.conflicts} conflict(s) kept both versions — review needed.

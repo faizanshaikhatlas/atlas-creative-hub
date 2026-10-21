@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Tag } from "lucide-react";
+import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Tag, CloudOff, UploadCloud, AlertTriangle, Check, Download, X } from "lucide-react";
 import {
   listProjects,
   createProject,
@@ -11,12 +11,16 @@ import {
   duplicateProject,
   renameProject,
   setProjectTags,
+  countLegacyDesigns,
+  importLegacyDesigns,
   SIZE_PRESETS,
 } from "@/lib/db/projects";
+import { classifySyncStatus, listProjectSyncStates } from "@/lib/sync/sync";
 import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
 import AccountMenu from "@/components/auth/AccountMenu";
 import CloudSync from "@/components/cloud/CloudSync";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 // Representative photo per theme for the browse tiles (already in /public).
 const THEME_PHOTO = {
@@ -44,7 +48,9 @@ function formatDate(ts) {
 
 export default function HomePage() {
   const router = useRouter();
+  const { configured, loading: authLoading, user, dbScope } = useAuth();
   const [projects, setProjects] = useState(null); // null = loading
+  const [syncStates, setSyncStates] = useState({});
   const [creating, setCreating] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [query, setQuery] = useState("");
@@ -52,17 +58,71 @@ export default function HomePage() {
   const [sortBy, setSortBy] = useState("recent"); // "recent" | "name"
   const [tagFilter, setTagFilter] = useState("all");
   const [error, setError] = useState(null);
+  // Legacy-design recovery (opt-in import from the pre-isolation database).
+  const [legacyCount, setLegacyCount] = useState(0);
+  const [legacyDismissed, setLegacyDismissed] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState(null);
+
+  const userId = user?.id ?? null;
 
   async function refresh() {
     try {
-      setProjects(await listProjects());
+      const [list, states] = await Promise.all([
+        listProjects(),
+        listProjectSyncStates().catch(() => ({})),
+      ]);
+      setProjects(list);
+      setSyncStates(states || {});
     } catch (err) {
       console.error(err);
       setError("Local storage (IndexedDB) is unavailable in this browser. Designs cannot be saved.");
       setProjects([]);
     }
   }
-  useEffect(() => { refresh(); }, []);
+
+  // Re-query local designs whenever the account scope changes (sign-in, sign-out,
+  // account switch, session restore). Waiting for auth to settle avoids showing
+  // the guest set for a split second before a restored session resolves.
+  useEffect(() => {
+    if (configured && authLoading) return;
+    // Clear immediately so a previous account's designs can never linger on
+    // screen during the async reload after an account switch / sign-out.
+    setProjects(null);
+    setSyncStates({});
+    refresh();
+  }, [dbScope, configured, authLoading]);
+
+  // Detect recoverable legacy designs once (count only; read-only).
+  useEffect(() => {
+    let active = true;
+    countLegacyDesigns()
+      .then((n) => { if (active) setLegacyCount(n); })
+      .catch(() => { if (active) setLegacyCount(0); });
+    return () => { active = false; };
+  }, []);
+
+  async function handleImportLegacy() {
+    setImporting(true);
+    setImportMsg(null);
+    try {
+      const { imported, skipped } = await importLegacyDesigns();
+      setImportMsg(
+        imported > 0
+          ? `Imported ${imported} design${imported === 1 ? "" : "s"}${skipped ? ` (${skipped} already here)` : ""}.`
+          : skipped
+          ? "These designs are already in this workspace."
+          : "No legacy designs to import."
+      );
+      setLegacyDismissed(true);
+      await refresh();
+    } catch (err) {
+      console.error(err);
+      setImportMsg("Could not import legacy designs.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function quickCreate({ type, width, height } = {}) {
     setShowNew(false);
@@ -155,6 +215,45 @@ export default function HomePage() {
 
         {error && (
           <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{error}</div>
+        )}
+
+        {/* Legacy-design recovery: offered only when the old shared database has
+            designs and nothing has been imported/dismissed yet this view. */}
+        {legacyCount > 0 && !legacyDismissed && (
+          <div className="mb-6 flex flex-col gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-2.5 text-sm text-slate-700">
+              <Download size={18} className="mt-0.5 shrink-0 text-brand-600" />
+              <p>
+                We found <strong>{legacyCount}</strong> design{legacyCount === 1 ? "" : "s"} saved before account
+                separation. Import them into{" "}
+                <strong>{userId ? `your account (${user?.email})` : "this device (guest)"}</strong>?
+                Your originals are kept safe and nothing is deleted.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={handleImportLegacy}
+                disabled={importing}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+              >
+                {importing ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
+                {importing ? "Importing…" : "Import designs"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setLegacyDismissed(true)}
+                className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-500 transition hover:text-slate-700"
+                aria-label="Dismiss"
+                title="Not now"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          </div>
+        )}
+        {importMsg && (
+          <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{importMsg}</div>
         )}
 
         {/* Create a design — popular formats */}
@@ -281,6 +380,7 @@ export default function HomePage() {
                   <li key={p.id}>
                     <DesignCard
                       p={p}
+                      status={classifySyncStatus(p, syncStates[p.id], { configured, userId })}
                       onOpen={(id) => router.push(`/editor/${id}`)}
                       onRename={handleRename}
                       onDuplicate={handleDuplicate}
@@ -300,7 +400,27 @@ export default function HomePage() {
   );
 }
 
-function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete, onSetTags }) {
+// Visual spec for each cloud state. "local" = on this device only; "synced" =
+// confirmed in the signed-in user's cloud; "needed" = owned but local edits not
+// yet uploaded; "failed" = last upload failed.
+const SYNC_BADGE = {
+  local: { label: "On this device", Icon: CloudOff, cls: "bg-slate-100 text-slate-500" },
+  synced: { label: "Synced", Icon: Check, cls: "bg-emerald-100 text-emerald-700" },
+  needed: { label: "Sync needed", Icon: UploadCloud, cls: "bg-amber-100 text-amber-700" },
+  failed: { label: "Sync failed", Icon: AlertTriangle, cls: "bg-rose-100 text-rose-700" },
+};
+
+function SyncBadge({ status }) {
+  const spec = SYNC_BADGE[status] || SYNC_BADGE.local;
+  const { label, Icon, cls } = spec;
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`} title={label}>
+      <Icon size={11} /> {label}
+    </span>
+  );
+}
+
+function DesignCard({ p, status = "local", onOpen, onRename, onDuplicate, onDelete, onSetTags }) {
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(p.name || "");
@@ -412,6 +532,7 @@ function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete, onSetTags }) {
             </p>
           )}
           <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)} · {p.width}×{p.height}</p>
+          <div className="mt-1"><SyncBadge status={status} /></div>
           {editingTags ? (
             <input
               autoFocus
