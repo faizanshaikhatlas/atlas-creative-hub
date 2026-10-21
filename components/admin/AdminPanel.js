@@ -199,6 +199,36 @@ function UserSection({ users, reload, busyId, setBusyId, setErr, adminEmail }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("all"); // all | pending | approved | rejected | disabled
   const [notice, setNotice] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null); // { id, email, counts }
+
+  // Reject = permanent hard-delete of the Auth account + profile (frees the email
+  // to register again). The server refuses with 409 when the user owns cloud rows
+  // unless we pass confirmDeleteData; we surface a confirmation for that case.
+  async function removeUser(u, confirmData = false) {
+    setErr(null);
+    setNotice(null);
+    setBusyId(u.id);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: u.id, confirmDeleteData: confirmData }),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data?.needsDataConfirm) {
+        setPendingDelete({ id: u.id, email: u.email, counts: data.counts });
+        return;
+      }
+      if (!res.ok) throw new Error(data?.error || "Could not delete the account.");
+      setPendingDelete(null);
+      setNotice(`Deleted ${u.email}. That email can register again now.`);
+      reload();
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function patch(id, patchBody) {
     setErr(null);
@@ -264,6 +294,37 @@ function UserSection({ users, reload, busyId, setBusyId, setErr, adminEmail }) {
         </div>
       )}
 
+      {pendingDelete && (
+        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <p className="font-semibold">Permanently delete {pendingDelete.email}?</p>
+          <p className="mt-1 text-[13px] leading-relaxed">
+            This permanently removes the account, its profile, and all of their data —{" "}
+            {pendingDelete.counts.projects} design{pendingDelete.counts.projects === 1 ? "" : "s"}
+            {pendingDelete.counts.components ? `, ${pendingDelete.counts.components} component${pendingDelete.counts.components === 1 ? "" : "s"}` : ""}
+            {pendingDelete.counts.storageFiles ? `, ${pendingDelete.counts.storageFiles} stored file${pendingDelete.counts.storageFiles === 1 ? "" : "s"}` : ""}
+            {" "}— from the database and Supabase Storage. This cannot be undone. Their local designs on their
+            own device are not affected, and the email can register again afterward.
+          </p>
+          <div className="mt-2.5 flex gap-2">
+            <button
+              type="button"
+              disabled={busyId === pendingDelete.id}
+              onClick={() => removeUser({ id: pendingDelete.id, email: pendingDelete.email }, true)}
+              className="inline-flex items-center gap-1 rounded-md bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50"
+            >
+              {busyId === pendingDelete.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Delete permanently
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingDelete(null)}
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -320,26 +381,43 @@ function UserSection({ users, reload, busyId, setBusyId, setErr, adminEmail }) {
                     <td className="px-4 py-2.5">
                       {self ? (
                         <p className="text-right text-[11px] text-slate-400">—</p>
-                      ) : (
+                      ) : isAdmin ? (
+                        /* Admins: governed by role + disable; never Reject/delete (demote first). */
                         <div className="flex flex-wrap items-center justify-end gap-1.5">
-                          {/* Approval (regular users only; admins are governed by role + disable) */}
-                          {!isAdmin && eff !== "approved" && eff !== "disabled" && (
-                            <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { status: "approved" })} icon={<UserCheck size={13} />} label="Approve" good />
-                          )}
-                          {!isAdmin && eff !== "rejected" && eff !== "disabled" && (
-                            <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { status: "rejected" })} icon={<UserX size={13} />} label="Reject" danger />
-                          )}
-                          {/* Role */}
-                          {isAdmin ? (
-                            <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { role: "user" })} icon={<ShieldOff size={13} />} label="Remove admin" />
-                          ) : (
-                            eff === "approved" && <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { role: "admin" })} icon={<Shield size={13} />} label="Make admin" />
-                          )}
-                          {/* Access */}
+                          <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { role: "user" })} icon={<ShieldOff size={13} />} label="Remove admin" />
                           {u.disabled ? (
                             <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { disabled: false })} icon={<Check size={13} />} label="Enable" />
                           ) : (
                             <ActionBtn busy={busyId === u.id} danger onClick={() => patch(u.id, { disabled: true })} icon={<Ban size={13} />} label="Disable" />
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {/* Disabled: kept account — only Enable to restore access. */}
+                          {eff === "disabled" && (
+                            <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { disabled: false })} icon={<Check size={13} />} label="Enable" />
+                          )}
+                          {/* Pending: Approve or Reject (delete). */}
+                          {eff === "pending" && (
+                            <>
+                              <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { status: "approved" })} icon={<UserCheck size={13} />} label="Approve" good />
+                              <ActionBtn busy={busyId === u.id} danger onClick={() => removeUser(u)} icon={<UserX size={13} />} label="Reject" />
+                            </>
+                          )}
+                          {/* Approved: Make admin, Disable, or Reject (delete). */}
+                          {eff === "approved" && (
+                            <>
+                              <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { role: "admin" })} icon={<Shield size={13} />} label="Make admin" />
+                              <ActionBtn busy={busyId === u.id} danger onClick={() => patch(u.id, { disabled: true })} icon={<Ban size={13} />} label="Disable" />
+                              <ActionBtn busy={busyId === u.id} danger onClick={() => removeUser(u)} icon={<Trash2 size={13} />} label="Reject" />
+                            </>
+                          )}
+                          {/* Legacy 'rejected' rows (no new ones are created): allow cleanup. */}
+                          {eff === "rejected" && (
+                            <>
+                              <ActionBtn busy={busyId === u.id} onClick={() => patch(u.id, { status: "approved" })} icon={<UserCheck size={13} />} label="Approve" good />
+                              <ActionBtn busy={busyId === u.id} danger onClick={() => removeUser(u)} icon={<Trash2 size={13} />} label="Delete" />
+                            </>
                           )}
                         </div>
                       )}
@@ -352,8 +430,10 @@ function UserSection({ users, reload, busyId, setBusyId, setErr, adminEmail }) {
         )}
       </div>
       <p className="mt-2 text-[11px] text-slate-400">
-        You can&apos;t change your own role, status, or access. Approvals are recorded server-side; disabling
-        bans the account in Supabase Auth and revokes cloud access immediately.
+        You can&apos;t change your own account. <strong>Reject</strong> permanently deletes the account and
+        its cloud data so the email can register again; <strong>Disable</strong> keeps the account and
+        revokes cloud access until you <strong>Enable</strong> it. Approvals and bans are enforced
+        server-side. A user&apos;s local on-device designs are never affected.
       </p>
     </section>
   );

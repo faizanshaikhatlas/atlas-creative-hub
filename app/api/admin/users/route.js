@@ -136,3 +136,173 @@ export async function PATCH(request) {
 
   return NextResponse.json({ ok: true, approvedNow, setupEmailSent });
 }
+
+// Private bucket holding every user's design assets, stored under a `${uid}/…`
+// prefix (see lib/sync/assets.js and the storage RLS `foldername(name)[1]`).
+const DESIGNS_BUCKET = "designs";
+
+/**
+ * Recursively enumerate every object path under a storage folder prefix,
+ * paginating each level. Supabase `list` is non-recursive and capped per call,
+ * so we walk sub-folders and page through them. A folder entry has a null `id`;
+ * a file entry has an `id` + metadata.
+ */
+async function listAllStorageFiles(svc, bucket, prefix) {
+  const files = [];
+  const PAGE = 100;
+  async function walk(folder) {
+    let offset = 0;
+    for (;;) {
+      const { data, error } = await svc.storage
+        .from(bucket)
+        .list(folder, { limit: PAGE, offset, sortBy: { column: "name", order: "asc" } });
+      if (error) throw error;
+      const batch = data || [];
+      for (const entry of batch) {
+        const path = folder ? `${folder}/${entry.name}` : entry.name;
+        if (!entry.id) await walk(path); // sub-folder → recurse
+        else files.push(path);
+      }
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+  }
+  await walk(prefix);
+  return files;
+}
+
+/**
+ * Delete storage objects in batches. Ownership guard: only paths inside the
+ * user's OWN `${uid}/` folder are ever removed, so a bug can never touch another
+ * user's files or global data. Returns how many were removed and any failures.
+ */
+async function removeOwnedStorage(svc, bucket, paths, uid) {
+  const guard = `${uid}/`;
+  const safe = paths.filter((p) => p.startsWith(guard));
+  const BATCH = 100;
+  let removed = 0;
+  const failures = [];
+  for (let i = 0; i < safe.length; i += BATCH) {
+    const chunk = safe.slice(i, i + BATCH);
+    const { data, error } = await svc.storage.from(bucket).remove(chunk);
+    if (error) failures.push(error.message);
+    else removed += (data || chunk).length;
+  }
+  return { attempted: safe.length, removed, failures, skipped: paths.length - safe.length };
+}
+
+/**
+ * DELETE /api/admin/users { id, confirmDeleteData? } → permanently and completely
+ * remove a rejected user (admin only):
+ *   1. Enumerate + delete the user's OWN Storage files (bucket `designs`, under
+ *      the immutable `${uid}/` prefix — never by email, never the whole bucket).
+ *   2. Hard-delete the Supabase Auth account, which cascades the profile and all
+ *      owner-scoped DB rows (projects → pages, components, assets) via existing
+ *      ON DELETE CASCADE FKs. This frees the email to register again immediately.
+ * Storage is purged FIRST so that if it fails the account is left intact and the
+ * admin can safely retry (reconciliation) rather than stranding orphaned files.
+ * Guards: cannot delete your OWN account; cannot delete an admin (demote first,
+ * which also preserves last-admin); requires `confirmDeleteData` when the user
+ * owns any data. Failure-aware: any step failing returns an error, never success.
+ */
+export async function DELETE(request) {
+  if (!isAdminConfigured()) return NextResponse.json({ error: "not_configured" }, { status: 503 });
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+  const id = typeof body?.id === "string" ? body.id : "";
+  if (!id) return NextResponse.json({ error: "Missing user id." }, { status: 400 });
+  if (id === admin.id) {
+    return NextResponse.json({ error: "You cannot delete your own account." }, { status: 400 });
+  }
+
+  const svc = getAdminClient();
+  const { data: target, error: tErr } = await svc
+    .from("profiles")
+    .select("id, email, role")
+    .eq("id", id)
+    .maybeSingle();
+  if (tErr || !target) return NextResponse.json({ error: "User not found." }, { status: 404 });
+  if (target.role === "admin") {
+    return NextResponse.json(
+      { error: "Remove the admin role before deleting this account." },
+      { status: 400 }
+    );
+  }
+
+  // Tally everything the deletion will remove so the admin can confirm the loss:
+  // the user's own Storage files (UID-prefixed) + owner-scoped DB rows (cascade).
+  // Pending users have none of either.
+  let storageFiles;
+  try {
+    storageFiles = await listAllStorageFiles(svc, DESIGNS_BUCKET, id);
+  } catch (e) {
+    return NextResponse.json(
+      { error: "Could not list the user's storage files.", stage: "storage-list", detail: e.message },
+      { status: 500 }
+    );
+  }
+  const [projects, components, assets] = await Promise.all([
+    svc.from("projects").select("id", { count: "exact", head: true }).eq("owner", id),
+    svc.from("components").select("id", { count: "exact", head: true }).eq("owner", id),
+    svc.from("assets").select("id", { count: "exact", head: true }).eq("owner", id),
+  ]);
+  const counts = {
+    projects: projects.count || 0,
+    components: components.count || 0,
+    assets: assets.count || 0,
+    storageFiles: storageFiles.length,
+  };
+  const total = counts.projects + counts.components + counts.assets + counts.storageFiles;
+
+  if (total > 0 && body?.confirmDeleteData !== true) {
+    return NextResponse.json(
+      { error: "confirm_required", needsDataConfirm: true, counts },
+      { status: 409 }
+    );
+  }
+
+  // 1. Purge the user's own Storage files FIRST. If this fails, stop before
+  //    touching the account so the admin can retry without orphaning anything.
+  if (storageFiles.length) {
+    const { removed, failures } = await removeOwnedStorage(svc, DESIGNS_BUCKET, storageFiles, id);
+    if (failures.length) {
+      return NextResponse.json(
+        {
+          error: "Storage cleanup failed — the account was NOT deleted. Please retry.",
+          stage: "storage-delete",
+          detail: failures[0],
+          storageRemoved: removed,
+          storageRemaining: storageFiles.length - removed,
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  // 2. Hard-delete the Auth user; cascades remove the profile + owner-scoped rows.
+  const { error: delErr } = await svc.auth.admin.deleteUser(id);
+  if (delErr) {
+    // Report the real failure — never show a false success. Storage is already
+    // gone; the account row remains, so the admin can retry to finish.
+    return NextResponse.json(
+      {
+        error: "Storage was cleaned, but account deletion failed. Retry to finish.",
+        stage: "auth-delete",
+        detail: delErr.message,
+      },
+      { status: 500 }
+    );
+  }
+
+  // 3. Safety net: ensure the profile row is gone even if the cascade didn't fire.
+  await svc.from("profiles").delete().eq("id", id);
+
+  return NextResponse.json({ ok: true, deleted: true, counts, storageDeleted: storageFiles.length });
+}
