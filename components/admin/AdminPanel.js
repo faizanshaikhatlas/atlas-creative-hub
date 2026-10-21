@@ -71,14 +71,14 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
   const [email, setEmail] = useState("");
   const [days, setDays] = useState(7);
   const [creating, setCreating] = useState(false);
-  const [lastLink, setLastLink] = useState(null);
+  const [lastInvite, setLastInvite] = useState(null); // { email, inviteUrl, expiresAt, emailSent, emailConfigured }
+  const [resending, setResending] = useState(false);
   const [copied, setCopied] = useState(false);
 
   async function create(e) {
     e.preventDefault();
     setErr(null);
     setCreating(true);
-    setLastLink(null);
     try {
       const res = await fetch("/api/admin/invitations", {
         method: "POST",
@@ -87,13 +87,42 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Could not create invitation.");
-      setLastLink(data.inviteUrl);
+      setLastInvite({
+        email: data.email,
+        inviteUrl: data.inviteUrl,
+        expiresAt: data.expiresAt,
+        emailSent: data.emailSent,
+        emailConfigured: data.emailConfigured,
+      });
       setEmail("");
       reload();
     } catch (e2) {
       setErr(e2.message);
     } finally {
       setCreating(false);
+    }
+  }
+
+  // Re-send the SAME invitation email, reusing the token already in this panel —
+  // never mints a new invite or revokes the current one.
+  async function resendEmail() {
+    if (!lastInvite?.inviteUrl) return;
+    setErr(null);
+    setResending(true);
+    try {
+      const token = new URL(lastInvite.inviteUrl).searchParams.get("token") || "";
+      const res = await fetch("/api/admin/invitations/resend", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Could not resend the email.");
+      setLastInvite((p) => ({ ...p, emailSent: data.emailSent, emailConfigured: data.emailConfigured }));
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setResending(false);
     }
   }
 
@@ -144,15 +173,58 @@ function InviteSection({ invites, reload, busyId, setBusyId, setErr }) {
         </button>
       </form>
 
-      {lastLink && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-emerald-800">{lastLink}</span>
-          <button
-            onClick={() => { navigator.clipboard?.writeText(lastLink); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-            className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs font-medium text-emerald-700"
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy link"}
-          </button>
+      {lastInvite && (
+        <div
+          className={`mb-4 rounded-xl border p-4 ${
+            lastInvite.emailSent ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"
+          }`}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <p className={`text-sm font-semibold ${lastInvite.emailSent ? "text-emerald-800" : "text-amber-800"}`}>
+              {lastInvite.emailSent
+                ? "Invitation created and email sent."
+                : lastInvite.emailConfigured
+                ? "Invitation created, but email could not be sent. Copy the link and share it manually."
+                : "Invitation created. Email sending isn't configured — copy the link and share it manually."}
+            </p>
+            <button
+              type="button"
+              onClick={() => setLastInvite(null)}
+              className="shrink-0 text-slate-400 hover:text-slate-600"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+
+          <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-slate-600">
+            <dt className="font-medium text-slate-500">Invited</dt>
+            <dd className="text-slate-800">{lastInvite.email}</dd>
+            <dt className="font-medium text-slate-500">Expires</dt>
+            <dd className="text-slate-800">{fmt(lastInvite.expiresAt)}</dd>
+          </dl>
+
+          <div className="mt-2.5 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-700">{lastInvite.inviteUrl}</span>
+            <button
+              type="button"
+              onClick={() => { navigator.clipboard?.writeText(lastInvite.inviteUrl); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              {copied ? <Check size={13} /> : <Copy size={13} />} {copied ? "Copied" : "Copy link"}
+            </button>
+          </div>
+
+          {lastInvite.emailConfigured && (
+            <button
+              type="button"
+              onClick={resendEmail}
+              disabled={resending}
+              className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {resending ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />} Resend email
+            </button>
+          )}
         </div>
       )}
 

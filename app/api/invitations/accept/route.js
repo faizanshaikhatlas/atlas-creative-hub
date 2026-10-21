@@ -58,7 +58,7 @@ export async function POST(request) {
     .is("accepted_at", null)
     .is("revoked_at", null)
     .gt("expires_at", nowIso)
-    .select("id, email")
+    .select("id, email, created_by")
     .maybeSingle();
 
   if (claimErr || !claimed) {
@@ -85,12 +85,25 @@ export async function POST(request) {
     );
   }
 
-  // Finalize: record who accepted.
-  await admin
-    .from("invitations")
-    .update({ accepted_by: created.user.id, accepted_at: nowIso })
-    .eq("id", claimed.id);
+  // Auto-approve: an admin-created invite is explicit pre-authorization, so the
+  // account is activated immediately as a regular (never admin) user. role/status
+  // are set server-side only — the browser never supplies them. The DB trigger
+  // created this profile as 'pending'; we promote it to 'approved'. If this update
+  // fails, the account simply remains pending (gated, no access) and an admin can
+  // approve it manually — we never grant access on a failed step.
+  const { error: profErr } = await admin
+    .from("profiles")
+    .update({
+      role: "user",
+      status: "approved",
+      approved_at: nowIso,
+      approved_by: claimed.created_by,
+    })
+    .eq("id", created.user.id);
+
+  // Finalize: record who accepted (the invite was already claimed above).
+  await admin.from("invitations").update({ accepted_by: created.user.id }).eq("id", claimed.id);
 
   // Return the email so the client can sign in; never return tokens/secrets.
-  return NextResponse.json({ ok: true, email: claimed.email });
+  return NextResponse.json({ ok: true, email: claimed.email, approved: !profErr });
 }

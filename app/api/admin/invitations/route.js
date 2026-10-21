@@ -2,8 +2,20 @@ import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { requireAdmin } from "@/lib/auth/roles";
 import { getAdminClient, isAdminConfigured } from "@/lib/supabase/admin";
+import { sendInvitationEmail, isEmailConfigured } from "@/lib/email/mailer";
 
 export const runtime = "nodejs";
+
+/**
+ * Build the invitation link against the ACTUAL deployment origin the admin is on
+ * (prod domain in production, localhost in local dev), so a production invite can
+ * never point at localhost. We intentionally do not read NEXT_PUBLIC_SITE_URL
+ * here to avoid a stale/mis-set value leaking a localhost link into production.
+ */
+function inviteUrlFor(request, token) {
+  const origin = new URL(request.url).origin;
+  return `${origin}/invite/accept?token=${token}`;
+}
 
 /** GET /api/admin/invitations → list all invitations (admin only). */
 export async function GET() {
@@ -51,7 +63,18 @@ export async function POST(request) {
   });
   if (error) return NextResponse.json({ error: "Could not create the invitation." }, { status: 500 });
 
-  const site = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
-  const inviteUrl = `${site.replace(/\/$/, "")}/invite/accept?token=${token}`;
-  return NextResponse.json({ ok: true, email, inviteUrl, expiresAt });
+  const inviteUrl = inviteUrlFor(request, token);
+
+  // Best-effort auto-send. The link is returned either way so the admin can
+  // always copy/share it; we report the real send status (never a false success).
+  const emailResult = await sendInvitationEmail({ to: email, inviteUrl, expiresAt });
+
+  return NextResponse.json({
+    ok: true,
+    email,
+    inviteUrl,
+    expiresAt,
+    emailConfigured: isEmailConfigured(),
+    emailSent: emailResult.sent === true,
+  });
 }
