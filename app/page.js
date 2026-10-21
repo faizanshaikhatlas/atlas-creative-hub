@@ -3,13 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, LogIn } from "lucide-react";
+import { Plus, Trash2, Loader2, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, LogIn, LayoutTemplate, Presentation, Share2, Video, FileText, Table, PenTool, Scaling, Upload, MoreHorizontal, AlertTriangle, RefreshCw } from "lucide-react";
 import { SIZE_PRESETS } from "@/lib/db/projects";
 import { apiListProjects, apiCreateProject, apiDeleteProject, apiGetProject, apiUpdateProject } from "@/lib/designs/client";
 import { THEMES } from "@/lib/template-catalog/formats";
+import { getFeatured, FORMATS } from "@/lib/template-catalog";
 import NewDesignDialog from "@/components/NewDesignDialog";
 import AccountMenu from "@/components/auth/AccountMenu";
 import DesignThumb from "@/components/designs/DesignThumb";
+import HomeBrandUploads from "@/components/dashboard/HomeBrandUploads";
+import TemplateCard from "@/components/templates/TemplateCard";
+import TemplatePreviewModal from "@/components/templates/TemplatePreviewModal";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 // Representative photo per theme for the browse tiles (already in /public).
@@ -24,7 +28,22 @@ const THEME_PHOTO = {
   tech: "/template-photos/tech-device.jpg",
 };
 
-const POPULAR = ["youtube-thumbnail", "instagram-post", "instagram-story", "presentation", "facebook-post", "youtube-banner"];
+// Home create-design shortcuts. Each leads to a REAL destination (create a
+// design, open the New design dialog, or go to templates) or honestly explains
+// an unavailable capability — never a fake button. The editor is a static
+// multi-page canvas, so Video/Doc/Whiteboard/Sheet are marked "soon".
+const CREATE_SHORTCUTS = [
+  { key: "templates", label: "Templates", Icon: LayoutTemplate, kind: "nav", href: "/templates" },
+  { key: "presentation", label: "Presentation", Icon: Presentation, kind: "create", type: "presentation" },
+  { key: "social", label: "Social media", Icon: Share2, kind: "dialog" },
+  { key: "video", label: "Video", Icon: Video, kind: "unavailable", note: "Video projects aren’t supported yet — ATLAS designs are static canvases. You can still make a video-sized canvas via “Custom size”." },
+  { key: "doc", label: "Doc", Icon: FileText, kind: "unavailable", note: "Documents aren’t available yet in ATLAS." },
+  { key: "whiteboard", label: "Whiteboard", Icon: PenTool, kind: "unavailable", note: "Whiteboards aren’t available yet in ATLAS." },
+  { key: "sheet", label: "Sheet", Icon: Table, kind: "unavailable", note: "Sheets aren’t available yet in ATLAS." },
+  { key: "custom", label: "Custom size", Icon: Scaling, kind: "dialog" },
+  { key: "upload", label: "Upload", Icon: Upload, kind: "info", note: "Uploads are added inside a design: create or open a design, then use the Uploads panel to add your own images." },
+  { key: "more", label: "More", Icon: MoreHorizontal, kind: "dialog" },
+];
 
 function newUuid() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
@@ -39,6 +58,15 @@ function formatDate(ts) {
   try { return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); } catch { return ""; }
 }
 
+// Human format label from the design's stored type (custom sizes → "Custom").
+function formatLabelFor(type) {
+  const preset = SIZE_PRESETS.find((s) => s.id === type);
+  return preset ? preset.label : "Custom";
+}
+
+// How many designs to show before "Show all" (client-side; all are already loaded).
+const RECENT_CAP = 12;
+
 export default function HomePage() {
   const router = useRouter();
   const { configured, loading: authLoading, user, active } = useAuth();
@@ -49,11 +77,14 @@ export default function HomePage() {
   const [query, setQuery] = useState("");
   const [designQuery, setDesignQuery] = useState("");
   const [sortBy, setSortBy] = useState("recent");
+  const [designFormat, setDesignFormat] = useState("all"); // private format filter
+  const [showAll, setShowAll] = useState(false); // expand beyond the recent cap
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null); // transient success/info
+  const [shortcutMsg, setShortcutMsg] = useState(null); // { tone:"info"|"warn", text }
+  const [preview, setPreview] = useState(null); // template being previewed
 
   const userId = user?.id ?? null;
-  const canEdit = configured && !!userId && active === true; // approved + signed in
 
   // Personal designs come ONLY from the authenticated user's cloud account.
   async function load() {
@@ -89,6 +120,30 @@ export default function HomePage() {
 
   function requireAuthThen(returnTo = "/") {
     router.push(`/login?next=${encodeURIComponent(returnTo)}`);
+  }
+
+  // Open the New design dialog (all formats + custom size), auth-gated.
+  function openCreateDialog() {
+    if (!configured) { setError("Cloud is not configured for this deployment."); return; }
+    if (!userId) { requireAuthThen("/"); return; }
+    if (active !== true) {
+      setError(active === false
+        ? "Your account is awaiting administrator approval before you can create designs."
+        : "Still checking your account — please try again in a moment.");
+      return;
+    }
+    setShortcutMsg(null);
+    setShowNew(true);
+  }
+
+  // Dispatch a home create-design shortcut to its real destination, or explain
+  // an unavailable capability (never a no-op button).
+  function runShortcut(s) {
+    setShortcutMsg(null);
+    if (s.kind === "nav") { router.push(s.href); return; }
+    if (s.kind === "create") { quickCreate({ type: s.type }); return; }
+    if (s.kind === "dialog") { openCreateDialog(); return; }
+    setShortcutMsg({ tone: s.kind === "unavailable" ? "warn" : "info", text: s.note });
   }
 
   async function quickCreate({ type, width, height } = {}) {
@@ -179,7 +234,7 @@ export default function HomePage() {
               Templates
             </button>
             <AccountMenu />
-            <button type="button" onClick={() => (canEdit ? setShowNew(true) : quickCreate())} disabled={creating}
+            <button type="button" onClick={openCreateDialog} disabled={creating}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60">
               {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create a design
             </button>
@@ -214,26 +269,64 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Create a design — popular formats */}
+        {/* Create a design — shortcut row */}
         <section className="mb-12">
           <h2 className="mb-4 text-lg font-semibold text-slate-900">Create a design</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {POPULAR.map((id) => {
-              const p = SIZE_PRESETS.find((s) => s.id === id);
-              if (!p) return null;
-              const landscape = p.width >= p.height;
+          {shortcutMsg && (
+            <div className={
+              "mb-4 rounded-lg border px-4 py-3 text-sm " +
+              (shortcutMsg.tone === "warn" ? "border-amber-200 bg-amber-50 text-amber-800" : "border-slate-200 bg-slate-50 text-slate-700")
+            }>
+              {shortcutMsg.text}
+            </div>
+          )}
+          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-10">
+            {CREATE_SHORTCUTS.map((s) => {
+              const unavailable = s.kind === "unavailable";
+              const Icon = s.Icon;
               return (
-                <button key={id} type="button" onClick={() => quickCreate({ type: id })}
-                  className="group flex flex-col items-center gap-2 rounded-2xl border border-slate-200 bg-white p-4 text-center transition hover:border-brand-400 hover:shadow-sm">
-                  <span className="flex h-16 w-full items-center justify-center">
-                    <span className="rounded-md bg-gradient-to-br from-brand-100 to-brand-200 ring-1 ring-brand-300/50"
-                      style={{ width: landscape ? 56 : 36, height: landscape ? 32 : 52 }} />
+                <button key={s.key} type="button" onClick={() => runShortcut(s)} title={s.note || s.label}
+                  className={
+                    "group relative flex flex-col items-center gap-1.5 rounded-2xl border p-3 text-center transition " +
+                    (unavailable
+                      ? "border-slate-200 bg-slate-50 opacity-70 hover:opacity-100"
+                      : "border-slate-200 bg-white hover:border-brand-400 hover:shadow-sm")
+                  }>
+                  <span className={
+                    "flex h-10 w-10 items-center justify-center rounded-full " +
+                    (unavailable ? "bg-slate-200 text-slate-400" : "bg-gradient-to-br from-brand-100 to-brand-200 text-brand-700")
+                  }>
+                    <Icon size={18} />
                   </span>
-                  <span className="text-xs font-medium text-slate-700">{p.label}</span>
-                  <span className="text-[10px] text-slate-400">{p.width}×{p.height}</span>
+                  <span className="text-[11px] font-medium leading-tight text-slate-700">{s.label}</span>
+                  {unavailable && (
+                    <span className="absolute right-1 top-1 rounded bg-slate-200 px-1 text-[8px] font-semibold uppercase tracking-wide text-slate-500">soon</span>
+                  )}
                 </button>
               );
             })}
+          </div>
+        </section>
+
+        {/* Browse by format */}
+        <section className="mb-12">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-slate-900">Browse by format</h2>
+            <button onClick={() => router.push("/templates")} className="inline-flex items-center gap-1 text-sm font-medium text-brand-600 hover:underline">
+              All templates <ArrowRight size={15} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {Object.entries(FORMATS).map(([id, f]) => (
+              <button key={id} type="button" onClick={() => router.push(`/templates?format=${id}`)}
+                className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-left transition hover:border-brand-400 hover:shadow-sm">
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-medium text-slate-700">{f.label}</span>
+                  <span className="block text-[11px] text-slate-400">{f.width} × {f.height}</span>
+                </span>
+                <ArrowRight size={15} className="shrink-0 text-slate-300" />
+              </button>
+            ))}
           </div>
         </section>
 
@@ -265,6 +358,27 @@ export default function HomePage() {
           </div>
         </section>
 
+        {/* Brand & uploads — discoverability for existing (in-editor) features */}
+        {active === true && <HomeBrandUploads onUse={openCreateDialog} />}
+
+        {/* Recommended templates — a curated static selection (not personalized) */}
+        <section className="mb-12">
+          <div className="mb-4 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Recommended templates</h2>
+              <p className="mt-0.5 text-xs text-slate-400">A curated selection to get you started.</p>
+            </div>
+            <button onClick={() => router.push("/templates")} className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-brand-600 hover:underline">
+              See all <ArrowRight size={15} />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-4">
+            {getFeatured().map((t) => (
+              <TemplateCard key={t.id} template={t} onPreview={setPreview} onError={setError} />
+            ))}
+          </div>
+        </section>
+
         {/* Your designs (from your account) */}
         <section>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -273,10 +387,23 @@ export default function HomePage() {
               {listState === "ok" && projects && projects.length > 0 && (
                 <>
                   <div className="relative">
+                    <label htmlFor="design-search" className="sr-only">Search your designs</label>
                     <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input value={designQuery} onChange={(e) => setDesignQuery(e.target.value)} placeholder="Search your designs…"
+                    <input id="design-search" type="search" value={designQuery} onChange={(e) => setDesignQuery(e.target.value)} placeholder="Search your designs…"
+                      aria-label="Search your designs"
                       className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-sm outline-none focus:border-brand-400 sm:w-56" />
                   </div>
+                  {(() => {
+                    const formats = [...new Set(projects.map((p) => p.type))];
+                    if (formats.length < 2) return null; // only meaningful with a mix
+                    return (
+                      <select value={designFormat} onChange={(e) => setDesignFormat(e.target.value)} aria-label="Filter your designs by format"
+                        className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-brand-400">
+                        <option value="all">All formats</option>
+                        {formats.map((t) => <option key={t} value={t}>{formatLabelFor(t)}</option>)}
+                      </select>
+                    );
+                  })()}
                   <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort designs"
                     className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-brand-400">
                     <option value="recent">Last edited</option>
@@ -293,12 +420,21 @@ export default function HomePage() {
               <span className="text-sm font-medium">Sign in to see and save your designs</span>
               <button type="button" onClick={() => requireAuthThen("/")} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Sign in or create an account</button>
             </div>
+          ) : listState === "error" ? (
+            <div className="flex w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-rose-200 bg-rose-50/40 py-16 text-slate-500">
+              <AlertTriangle size={28} className="text-rose-400" />
+              <span className="text-sm font-medium">Couldn’t load your designs</span>
+              <span className="text-xs text-slate-400">Check your connection, then try again.</span>
+              <button type="button" onClick={load} className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">
+                <RefreshCw size={14} /> Retry
+              </button>
+            </div>
           ) : listState === "loading" || projects === null ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => <div key={i} className="aspect-video animate-pulse rounded-2xl bg-slate-200" />)}
             </div>
           ) : projects.length === 0 ? (
-            <button type="button" onClick={() => (canEdit ? setShowNew(true) : quickCreate())}
+            <button type="button" onClick={openCreateDialog}
               className="flex w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 py-16 text-slate-400 transition hover:border-brand-400 hover:text-brand-600">
               <Sparkles size={30} />
               <span className="text-sm font-medium">No designs yet — create your first one</span>
@@ -306,24 +442,40 @@ export default function HomePage() {
             </button>
           ) : (() => {
             const q = designQuery.trim().toLowerCase();
-            const visible = projects
+            const filtering = q !== "" || designFormat !== "all";
+            const all = projects
               .filter((p) => !q || (p.name || "").toLowerCase().includes(q))
+              .filter((p) => designFormat === "all" || p.type === designFormat)
               .sort((a, b) => (sortBy === "name" ? (a.name || "").localeCompare(b.name || "") : (b.updatedAt || 0) - (a.updatedAt || 0)));
-            if (visible.length === 0) return <p className="py-10 text-center text-sm text-slate-400">No designs match your search.</p>;
+            if (all.length === 0) return <p className="py-10 text-center text-sm text-slate-400">No designs match your search or filter.</p>;
+            // When filtering we show every match; otherwise cap the recent grid
+            // with a "Show all" expander (all designs are already loaded).
+            const capped = filtering || showAll ? all : all.slice(0, RECENT_CAP);
             return (
-              <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                {visible.map((p) => (
-                  <li key={p.id}>
-                    <DesignCard p={p} userId={userId} onOpen={(id) => router.push(`/editor/${id}`)} onRename={handleRename} onDuplicate={handleDuplicate} onDelete={handleDelete} />
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {capped.map((p) => (
+                    <li key={p.id}>
+                      <DesignCard p={p} userId={userId} onOpen={(id) => router.push(`/editor/${id}`)} onRename={handleRename} onDuplicate={handleDuplicate} onDelete={handleDelete} />
+                    </li>
+                  ))}
+                </ul>
+                {!filtering && !showAll && all.length > RECENT_CAP && (
+                  <div className="mt-6 text-center">
+                    <button type="button" onClick={() => setShowAll(true)}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400">
+                      Show all {all.length} designs
+                    </button>
+                  </div>
+                )}
+              </>
             );
           })()}
         </section>
       </main>
 
       <NewDesignDialog open={showNew} onClose={() => setShowNew(false)} onCreate={quickCreate} />
+      {preview && <TemplatePreviewModal template={preview} onClose={() => setPreview(null)} onError={setError} />}
     </div>
   );
 }
@@ -402,7 +554,8 @@ function DesignCard({ p, userId, onOpen, onRename, onDuplicate, onDelete }) {
           ) : (
             <p className="truncate text-sm font-semibold text-slate-800" title={p.name || "Untitled"} onDoubleClick={() => setRenaming(true)}>{p.name || "Untitled"}</p>
           )}
-          <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)} · {p.width}×{p.height}</p>
+          <p className="truncate text-[11px] text-slate-400">{formatLabelFor(p.type)} · {p.width} × {p.height}</p>
+          <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)}</p>
         </div>
         <div className="relative" ref={menuRef}>
           <button ref={btnRef} type="button" aria-label="Design actions" aria-haspopup="menu" aria-expanded={menu}
