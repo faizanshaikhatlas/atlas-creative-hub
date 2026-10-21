@@ -11,9 +11,9 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
-import { saveProject, createBlankPage } from "@/lib/db/projects";
+import { createBlankPage } from "@/lib/db/projects";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { pushProjectSafe } from "@/lib/sync/sync";
+import { apiUpdateProject } from "@/lib/designs/client";
 import CanvasStage from "@/components/editor/CanvasStage";
 import Toolbar from "@/components/editor/Toolbar";
 import ElementsPanel from "@/components/editor/ElementsPanel";
@@ -266,67 +266,83 @@ export default function Editor({ project }) {
 
   /* ----------------------------- save -------------------------------- */
 
-  // Auth is read through a ref so the save callbacks don't need to be recreated
+  // Auth is read through a ref so the save callback doesn't need to be recreated
   // (and re-fire the debounce) every time the session/approval changes.
   const { configured, user, active, online } = useAuth();
   const authRef = useRef({ configured, user, active, online });
   authRef.current = { configured, user, active, online };
-  const cloudPushTimer = useRef(null);
 
-  // Automatic, debounced cloud push after a successful local save. Only for a
-  // signed-in, APPROVED owner (guests/pending users stay local-only — honest
-  // status, no failed-upload noise). Failure-aware via pushProjectSafe.
-  const scheduleCloudPush = useCallback(() => {
-    const a = authRef.current;
-    if (!a.configured || !a.user || !a.active) return;
-    if (cloudPushTimer.current) clearTimeout(cloudPushTimer.current);
-    cloudPushTimer.current = setTimeout(async () => {
-      const store = useEditorStore.getState();
-      const u = authRef.current.user;
-      if (!u) return;
-      store.setCloudStatus("saving");
-      const res = await pushProjectSafe(project.id, u.id);
-      if (res.status === "ok") store.setCloudStatus("saved");
-      else store.setCloudStatus(authRef.current.online === false ? "offline" : "failed");
-    }, 1500);
-  }, [project.id]);
-
-  useEffect(() => () => { if (cloudPushTimer.current) clearTimeout(cloudPushTimer.current); }, []);
-
-  // Persist once approval resolves: a design created or edited before /api/me
-  // returned active=true would otherwise never be pushed. Idempotent (upsert).
-  useEffect(() => {
-    if (configured && user && active) scheduleCloudPush();
-  }, [active, configured, user, scheduleCloudPush]);
+  // Server is the single source of truth. Autosave PUTs to /api/projects/:id.
+  // lastUpdatedRef carries optimistic-concurrency state; savingRef/pendingRef
+  // coalesce overlapping saves (single-flight) so responses can't land stale.
+  const lastUpdatedRef = useRef(project.updatedAt || null);
+  const savingRef = useRef(false);
+  const pendingRef = useRef(false);
 
   const doSave = useCallback(async () => {
     const c = controllerRef.current;
     if (!c) return;
     const store = useEditorStore.getState();
-    store.setSaving(true);
-    try {
-      const { pages: curPages, activePageId: curActive } = pagesRef.current;
-      const captured = captureActive(curPages, curActive);
-      pagesRef.current = { pages: captured, activePageId: curActive };
-      setPages(captured);
-      const cover =
-        captured.find((p) => p.id === curActive)?.thumbnail ||
-        captured[0]?.thumbnail ||
-        null;
-      await saveProject(project.id, {
-        pages: captured,
-        activePageId: curActive,
-        thumbnail: cover,
-        name: store.projectName,
-      });
-      store.markSaved();
-      scheduleCloudPush(); // mirror the save to the owner's cloud (if approved)
-    } catch (err) {
-      console.error("Save failed:", err);
-      store.setSaving(false);
-      showToast("Could not save the project.");
+
+    // Capture the live canvas into the pages model first (always, so no edit is lost).
+    const { pages: curPages, activePageId: curActive } = pagesRef.current;
+    const captured = captureActive(curPages, curActive);
+    pagesRef.current = { pages: captured, activePageId: curActive };
+    setPages(captured);
+
+    const a = authRef.current;
+    if (!a.configured || !a.user || !a.active) {
+      // Editing requires an approved account; the route is auth-gated, so this is
+      // only a transient state. Never claim a save we didn't make.
+      store.setCloudStatus(a.user ? "failed" : "offline");
+      return;
     }
-  }, [project.id, captureActive, showToast, scheduleCloudPush]);
+
+    // Single-flight: coalesce a save requested while one is in progress.
+    if (savingRef.current) { pendingRef.current = true; return; }
+    savingRef.current = true;
+    store.setSaving(true);
+    store.setCloudStatus("saving");
+    try {
+      const res = await apiUpdateProject(
+        project.id,
+        {
+          name: store.projectName,
+          type: project.type,
+          width: project.width,
+          height: project.height,
+          activePageId: curActive,
+          pages: captured,
+        },
+        { userId: a.user.id, expectedUpdatedAt: lastUpdatedRef.current }
+      );
+      lastUpdatedRef.current = res.updatedAt;
+      store.markSaved();
+      store.setCloudStatus("saved");
+    } catch (err) {
+      store.setSaving(false);
+      if (err?.code === "conflict") {
+        if (err.serverUpdatedAt) lastUpdatedRef.current = err.serverUpdatedAt;
+        store.setCloudStatus("failed");
+        showToast("This design was changed on another device. Reload to get the latest before editing more.");
+      } else {
+        store.setCloudStatus(authRef.current.online === false ? "offline" : "failed");
+        showToast("Couldn’t save to your account — we’ll keep trying. Don’t close until it saves.");
+      }
+    } finally {
+      savingRef.current = false;
+      if (pendingRef.current) { pendingRef.current = false; setTimeout(() => doSave(), 0); }
+    }
+  }, [project.id, project.type, project.width, project.height, captureActive, showToast]);
+
+  // Warn before leaving with unsaved (unconfirmed) changes — never silently drop them.
+  useEffect(() => {
+    const handler = (e) => {
+      if (useEditorStore.getState().isDirty) { e.preventDefault(); e.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
 
   // Debounced autosave: every canvas change or page op bumps `rev`.
   useEffect(() => {

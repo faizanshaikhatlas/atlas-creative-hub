@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import { Search, ArrowLeft, X, Loader2, Sparkles, SearchX, ChevronRight, Star } from "lucide-react";
 import {
   THEMES, FORMATS, TEMPLATES, filterTemplates, getFeatured, templatesByTheme,
-  renderTemplateThumbnail, createDesignFromTemplate,
+  renderTemplateThumbnail, buildTemplateDesign,
 } from "@/lib/template-catalog";
 import TemplateCard from "@/components/templates/TemplateCard";
+import { apiCreateProject } from "@/lib/designs/client";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 const GRID = "grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 xl:grid-cols-4";
 
@@ -175,6 +177,7 @@ function Chip({ active, onClick, children, dot }) {
 
 function PreviewModal({ template, onClose, onError }) {
   const router = useRouter();
+  const { configured, user, active } = useAuth();
   const [src, setSrc] = useState(null);
   const [creating, setCreating] = useState(false);
   const fmt = FORMATS[template.format];
@@ -186,14 +189,18 @@ function PreviewModal({ template, onClose, onError }) {
   }, [template]);
 
   async function use() {
+    if (!configured) { onError?.("Cloud is not configured for this deployment."); onClose(); return; }
+    if (!user) { router.push(`/login?next=${encodeURIComponent("/templates")}`); return; }
+    if (!active) { onError?.("Your account is awaiting administrator approval before you can create designs."); onClose(); return; }
     setCreating(true);
     try {
-      const id = await createDesignFromTemplate(template);
-      router.push(`/editor/${id}`);
+      const payload = await buildTemplateDesign(template);
+      const res = await apiCreateProject(payload, user.id);
+      router.push(`/editor/${res.id}`);
     } catch (e) {
       console.error(e);
       setCreating(false);
-      onError?.("Could not create a design from this template.");
+      onError?.(e?.status === 403 ? "Your account is awaiting approval." : "Could not create a design from this template.");
       onClose();
     }
   }

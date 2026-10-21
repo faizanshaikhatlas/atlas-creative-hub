@@ -3,16 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Tag, Cloud, CloudOff, UploadCloud, AlertTriangle, Check, Clock } from "lucide-react";
-import {
-  listProjects,
-  createProject,
-  duplicateProject,
-  renameProject,
-  setProjectTags,
-  SIZE_PRESETS,
-} from "@/lib/db/projects";
-import { classifySyncStatus, listProjectSyncStates, deleteDesign, isOwnedByUser, syncPull, reconcileOnLogin } from "@/lib/sync/sync";
+import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Download, LogIn } from "lucide-react";
+import { SIZE_PRESETS } from "@/lib/db/projects";
+import { apiListProjects, apiCreateProject, apiDeleteProject, apiGetProject, apiUpdateProject } from "@/lib/designs/client";
 import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
 import AccountMenu from "@/components/auth/AccountMenu";
@@ -30,161 +23,130 @@ const THEME_PHOTO = {
   tech: "/template-photos/tech-device.jpg",
 };
 
-// Popular quick-create formats (ids map to SIZE_PRESETS).
 const POPULAR = ["youtube-thumbnail", "instagram-post", "instagram-story", "presentation", "facebook-post", "youtube-banner"];
+
+function newUuid() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
 
 function formatDate(ts) {
   if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-  } catch {
-    return "";
-  }
+  try { return new Date(ts).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }); } catch { return ""; }
 }
 
 export default function HomePage() {
   const router = useRouter();
-  const { configured, loading: authLoading, user, dbScope, active, online } = useAuth();
+  const { configured, loading: authLoading, user, active } = useAuth();
   const [projects, setProjects] = useState(null); // null = loading
-  const [syncStates, setSyncStates] = useState({});
+  const [listState, setListState] = useState("loading"); // loading|ok|signedout|pending|error
   const [creating, setCreating] = useState(false);
   const [showNew, setShowNew] = useState(false);
   const [query, setQuery] = useState("");
   const [designQuery, setDesignQuery] = useState("");
-  const [sortBy, setSortBy] = useState("recent"); // "recent" | "name"
-  const [tagFilter, setTagFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("recent");
   const [error, setError] = useState(null);
-  const [deleteMsg, setDeleteMsg] = useState(null); // { tone: "ok"|"warn", text }
-  // Automatic-sync status for the header chip.
-  const [syncState, setSyncState] = useState("idle"); // idle|syncing|synced|offline|failed|pending
+  const [notice, setNotice] = useState(null); // transient success/info
 
   const userId = user?.id ?? null;
-  // Cloud is authoritative only for a signed-in, APPROVED owner who is online.
-  const cloudActive = configured && !!userId && active && online;
+  const canEdit = configured && !!userId && active; // approved + signed in
 
-  // Read the local cache (per-account IndexedDB) into the dashboard.
-  async function loadLocal() {
-    const [list, states] = await Promise.all([
-      listProjects(),
-      listProjectSyncStates().catch(() => ({})),
-    ]);
-    setProjects(list);
-    setSyncStates(states || {});
-    return { list, states: states || {} };
-  }
-
-  // One automatic reconcile: pull the owner's cloud designs into the local cache
-  // (tombstone-aware — deleted designs never return), render them, then push any
-  // locally-changed owned designs back up. No manual Sync button, no import.
-  async function refresh() {
+  // Personal designs come ONLY from the authenticated user's cloud account.
+  async function load() {
+    setError(null);
+    if (!configured) { setProjects([]); setListState("ok"); return; }
+    if (!userId) { setProjects([]); setListState("signedout"); return; }
+    if (!active) { setProjects([]); setListState("pending"); return; }
+    setListState("loading");
     try {
-      if (!cloudActive) {
-        // Guest, pending approval, or offline → show the local cache as-is. For a
-        // signed-in-but-unapproved user this is only their own scoped designs.
-        await loadLocal();
-        setSyncState(configured && userId && !active ? "pending" : online ? "idle" : "offline");
-        return;
-      }
-      setSyncState("syncing");
-      let pullOk = true;
-      try {
-        await syncPull(userId); // cloud → local cache (tombstone-aware)
-      } catch {
-        pullOk = false;
-      }
-      // Adopt in-scope designs and push everything owned-but-unconfirmed, so a
-      // design that only lives in this browser is persisted to the account.
-      let reconcileOk = true;
-      try {
-        await reconcileOnLogin(userId);
-      } catch {
-        reconcileOk = false;
-      }
-      const { list, states } = await loadLocal();
-      // Honest status: "Synced" ONLY when every owned design is confirmed in the
-      // cloud (never green while an owned design is still local-only/failed).
-      const ownedUnconfirmed = list.filter(
-        (p) => isOwnedByUser(p, userId) && classifySyncStatus(p, states[p.id], { configured, userId }) !== "synced"
-      );
-      setSyncState(pullOk && reconcileOk && ownedUnconfirmed.length === 0 ? "synced" : "failed");
-    } catch (err) {
-      console.error(err);
-      setError("Local storage (IndexedDB) is unavailable in this browser. Designs cannot be saved.");
-      setProjects([]);
+      const rows = await apiListProjects();
+      setProjects(rows.map((r) => ({
+        id: r.id, name: r.name, type: r.type, width: r.width, height: r.height,
+        updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : 0,
+      })));
+      setListState("ok");
+    } catch (e) {
+      if (e.status === 401) { setProjects([]); setListState("signedout"); }
+      else if (e.status === 403) { setProjects([]); setListState("pending"); }
+      else { setProjects([]); setListState("error"); setError("Could not load your designs. Check your connection and try again."); }
     }
   }
 
-  // Clear immediately on account switch / sign-out so a previous account's
-  // designs can never linger on screen while the new account's load runs.
+  // Load whenever auth settles or the account/approval changes.
   useEffect(() => {
-    setProjects(null);
-    setSyncStates({});
-  }, [dbScope]);
-
-  // Automatically load + sync whenever auth settles or connectivity/approval
-  // changes (e.g. reconnecting, or an admin approving the account mid-session).
-  useEffect(() => {
-    if (configured && authLoading) return;
-    refresh();
+    if (authLoading) return;
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbScope, configured, authLoading, active, online]);
+  }, [authLoading, configured, userId, active]);
+
+  function requireAuthThen(returnTo = "/") {
+    router.push(`/login?next=${encodeURIComponent(returnTo)}`);
+  }
 
   async function quickCreate({ type, width, height } = {}) {
-    // Scope-race guard: don't create until the session (and thus the account
-    // scope) has resolved, so a signed-in user's new design can't land in the
-    // guest database with the wrong ownerScope.
-    if (configured && authLoading) {
-      setError("Finishing sign-in… please try again in a moment.");
-      return;
-    }
+    if (!configured) { setError("Cloud is not configured for this deployment."); return; }
+    if (!userId) { setShowNew(false); requireAuthThen("/"); return; }
+    if (!active) { setShowNew(false); setError("Your account is awaiting administrator approval before you can create designs."); return; }
     setShowNew(false);
     setCreating(true);
     setError(null);
     try {
-      const project = await createProject({ name: "Untitled design", type: type || "youtube-thumbnail", width, height });
-      router.push(`/editor/${project.id}`);
-    } catch (err) {
-      console.error(err);
+      const preset = SIZE_PRESETS.find((s) => s.id === type) || SIZE_PRESETS[0];
+      const w = width || preset.width;
+      const h = height || preset.height;
+      const page = { id: newUuid(), name: "Page 1", json: null, background: "#ffffff", width: w, height: h };
+      const res = await apiCreateProject(
+        { name: "Untitled design", type: type || "custom", width: w, height: h, activePageId: page.id, pages: [page] },
+        userId
+      );
+      router.push(`/editor/${res.id}`);
+    } catch (e) {
+      console.error(e);
       setCreating(false);
-      setError("Could not create a new design.");
+      setError(e.status === 403 ? "Your account is awaiting approval." : "Could not create a new design.");
     }
   }
 
   async function handleDelete(p) {
-    const owned = isOwnedByUser(p, userId);
-    const name = p.name || "this design";
-    const scopeMsg = owned
-      ? `Delete “${name}”? This permanently removes it from this device and your cloud account. This cannot be undone.`
-      : `Delete “${name}”? This removes it from this device. It isn’t saved to any cloud account. This cannot be undone.`;
-    if (!window.confirm(scopeMsg)) return;
-    setDeleteMsg(null);
+    if (!window.confirm(`Delete “${p.name || "this design"}”? This permanently removes it from your account and cannot be undone.`)) return;
+    setError(null);
     try {
-      const res = await deleteDesign(p, { userId, configured });
-      await refresh();
-      if (res.cloudPending) {
-        setDeleteMsg({ tone: "warn", text: `“${name}” was removed from this device. Its cloud copy couldn’t be deleted yet — it will retry on your next sync.` });
-      } else if (res.scope === "cloud") {
-        setDeleteMsg({ tone: "ok", text: `“${name}” was permanently deleted from this device and your cloud account.` });
-      }
-    } catch (err) {
-      console.error(err);
+      await apiDeleteProject(p.id);
+      setNotice(`“${p.name || "Design"}” was permanently deleted.`);
+      await load();
+    } catch (e) {
+      console.error(e);
       setError("Could not delete the design.");
     }
   }
 
-  async function handleDuplicate(id) {
-    try { await duplicateProject(id); refresh(); }
-    catch (err) { console.error(err); setError("Could not duplicate the design."); }
+  async function handleDuplicate(p) {
+    setError(null);
+    try {
+      const full = await apiGetProject(p.id, userId);
+      const pages = full.pages.map((pg, i) => ({ ...pg, id: newUuid(), name: pg.name || `Page ${i + 1}` }));
+      await apiCreateProject(
+        { name: `${full.name || "Untitled design"} copy`, type: full.type, width: full.width, height: full.height, activePageId: pages[0]?.id, pages },
+        userId
+      );
+      await load();
+    } catch (e) { console.error(e); setError("Could not duplicate the design."); }
   }
 
-  async function handleRename(id, name) {
-    try { await renameProject(id, name); refresh(); }
-    catch (err) { console.error(err); setError("Could not rename the design."); }
-  }
-
-  async function handleSetTags(id, tags) {
-    try { await setProjectTags(id, tags); refresh(); }
-    catch (err) { console.error(err); setError("Could not update tags."); }
+  async function handleRename(p, name) {
+    const trimmed = (name || "").trim();
+    if (!trimmed || trimmed === p.name) return;
+    setError(null);
+    try {
+      const full = await apiGetProject(p.id, userId);
+      await apiUpdateProject(p.id,
+        { name: trimmed, type: full.type, width: full.width, height: full.height, activePageId: full.activePageId, pages: full.pages },
+        { userId, expectedUpdatedAt: full.updatedAt });
+      await load();
+    } catch (e) { console.error(e); setError(e.code === "conflict" ? "This design changed on another device — reopen it and try again." : "Could not rename the design."); }
   }
 
   function submitSearch(e) {
@@ -205,9 +167,8 @@ export default function HomePage() {
               className="hidden rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:text-brand-700 sm:inline-flex">
               Templates
             </button>
-            <SyncStatusChip state={syncState} />
             <AccountMenu />
-            <button type="button" onClick={() => setShowNew(true)} disabled={creating}
+            <button type="button" onClick={() => (canEdit ? setShowNew(true) : quickCreate())} disabled={creating}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60">
               {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create a design
             </button>
@@ -218,47 +179,27 @@ export default function HomePage() {
       <main className="mx-auto max-w-[1400px] px-4 pb-20 sm:px-6">
         {/* Hero + search */}
         <section className="py-10 text-center sm:py-14">
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            What will you design today?
-          </h1>
+          <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">What will you design today?</h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
-            Start from a template or a blank canvas. Everything is saved on this device — no sign-in needed.
+            Start from a template or a blank canvas. Sign in to save your designs to your account and open them on any device.
           </p>
           <form onSubmit={submitSearch} className="mx-auto mt-6 flex max-w-xl items-center">
             <div className="relative flex-1">
               <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+              <input value={query} onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search templates — “sale”, “launch”, “menu”, “admissions”…"
                 className="w-full rounded-l-xl border border-r-0 border-slate-200 bg-white py-3 pl-11 pr-3 text-sm outline-none focus:border-brand-400"
-                aria-label="Search templates"
-              />
+                aria-label="Search templates" />
             </div>
-            <button type="submit" className="rounded-r-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-brand-700">
-              Search
-            </button>
+            <button type="submit" className="rounded-r-xl bg-brand-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-brand-700">Search</button>
           </form>
         </section>
 
-        {error && (
-          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{error}</div>
-        )}
-
-        {configured && userId && !active && (
+        {error && <div className="mb-6 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
+        {notice && <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
+        {listState === "pending" && (
           <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Your account is awaiting administrator approval. Your designs are saved on this device and will
-            sync to your cloud account automatically once you&apos;re approved.
-          </div>
-        )}
-        {deleteMsg && (
-          <div className={
-            "mb-6 rounded-lg border px-4 py-3 text-sm " +
-            (deleteMsg.tone === "warn"
-              ? "border-amber-200 bg-amber-50 text-amber-800"
-              : "border-emerald-200 bg-emerald-50 text-emerald-800")
-          }>
-            {deleteMsg.text}
+            Your account is awaiting administrator approval. You can browse templates now; creating and saving designs unlocks once you&apos;re approved.
           </div>
         )}
 
@@ -313,55 +254,46 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Recent designs */}
+        {/* Your designs (from your account) */}
         <section>
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">Your recent designs</h2>
-            {projects && projects.length > 0 && (
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={designQuery}
-                    onChange={(e) => setDesignQuery(e.target.value)}
-                    placeholder="Search your designs…"
-                    className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-sm outline-none focus:border-brand-400 sm:w-56"
-                  />
-                </div>
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-brand-400"
-                  aria-label="Sort designs"
-                >
-                  <option value="recent">Last edited</option>
-                  <option value="name">Name (A–Z)</option>
-                </select>
-              </div>
-            )}
+            <h2 className="text-lg font-semibold text-slate-900">Your designs</h2>
+            <div className="flex items-center gap-2">
+              {canEdit && (
+                <button type="button" onClick={() => router.push("/recover")} title="Import designs saved in this browser into your account"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:border-brand-400">
+                  <Download size={14} /> Recover device designs
+                </button>
+              )}
+              {listState === "ok" && projects && projects.length > 0 && (
+                <>
+                  <div className="relative">
+                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input value={designQuery} onChange={(e) => setDesignQuery(e.target.value)} placeholder="Search your designs…"
+                      className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-2 text-sm outline-none focus:border-brand-400 sm:w-56" />
+                  </div>
+                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} aria-label="Sort designs"
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm text-slate-600 outline-none focus:border-brand-400">
+                    <option value="recent">Last edited</option>
+                    <option value="name">Name (A–Z)</option>
+                  </select>
+                </>
+              )}
+            </div>
           </div>
 
-          {projects && projects.length > 0 && (() => {
-            const allTags = [...new Set(projects.flatMap((p) => p.tags || []))].sort((a, b) => a.localeCompare(b));
-            if (!allTags.length) return null;
-            return (
-              <div className="ds-scroll mb-4 flex gap-2 overflow-x-auto pb-1">
-                <HomeChip active={tagFilter === "all"} onClick={() => setTagFilter("all")}>All</HomeChip>
-                {allTags.map((t) => (
-                  <HomeChip key={t} active={tagFilter === t} onClick={() => setTagFilter(t)}>#{t}</HomeChip>
-                ))}
-              </div>
-            );
-          })()}
-
-          {projects === null ? (
+          {listState === "signedout" ? (
+            <div className="flex w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 py-16 text-slate-500">
+              <LogIn size={28} className="text-slate-400" />
+              <span className="text-sm font-medium">Sign in to see and save your designs</span>
+              <button type="button" onClick={() => requireAuthThen("/")} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-700">Sign in or create an account</button>
+            </div>
+          ) : listState === "loading" || projects === null ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="aspect-video animate-pulse rounded-2xl bg-slate-200" />
-              ))}
+              {Array.from({ length: 4 }).map((_, i) => <div key={i} className="aspect-video animate-pulse rounded-2xl bg-slate-200" />)}
             </div>
           ) : projects.length === 0 ? (
-            <button type="button" onClick={() => setShowNew(true)}
+            <button type="button" onClick={() => (canEdit ? setShowNew(true) : quickCreate())}
               className="flex w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-300 bg-white/60 py-16 text-slate-400 transition hover:border-brand-400 hover:text-brand-600">
               <Sparkles size={30} />
               <span className="text-sm font-medium">No designs yet — create your first one</span>
@@ -371,28 +303,13 @@ export default function HomePage() {
             const q = designQuery.trim().toLowerCase();
             const visible = projects
               .filter((p) => !q || (p.name || "").toLowerCase().includes(q))
-              .filter((p) => tagFilter === "all" || (p.tags || []).includes(tagFilter))
-              .sort((a, b) =>
-                sortBy === "name"
-                  ? (a.name || "").localeCompare(b.name || "")
-                  : (b.updatedAt || 0) - (a.updatedAt || 0)
-              );
-            if (visible.length === 0) {
-              return <p className="py-10 text-center text-sm text-slate-400">No designs match your search or tag filter.</p>;
-            }
+              .sort((a, b) => (sortBy === "name" ? (a.name || "").localeCompare(b.name || "") : (b.updatedAt || 0) - (a.updatedAt || 0)));
+            if (visible.length === 0) return <p className="py-10 text-center text-sm text-slate-400">No designs match your search.</p>;
             return (
               <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {visible.map((p) => (
                   <li key={p.id}>
-                    <DesignCard
-                      p={p}
-                      status={classifySyncStatus(p, syncStates[p.id], { configured, userId })}
-                      onOpen={(id) => router.push(`/editor/${id}`)}
-                      onRename={handleRename}
-                      onDuplicate={handleDuplicate}
-                      onDelete={handleDelete}
-                      onSetTags={handleSetTags}
-                    />
+                    <DesignCard p={p} onOpen={(id) => router.push(`/editor/${id}`)} onRename={handleRename} onDuplicate={handleDuplicate} onDelete={handleDelete} />
                   </li>
                 ))}
               </ul>
@@ -406,37 +323,15 @@ export default function HomePage() {
   );
 }
 
-// Visual spec for each cloud state. "local" = on this device only; "synced" =
-// confirmed in the signed-in user's cloud; "needed" = owned but local edits not
-// yet uploaded; "failed" = last upload failed.
-const SYNC_BADGE = {
-  local: { label: "On this device", Icon: CloudOff, cls: "bg-slate-100 text-slate-500" },
-  synced: { label: "Synced", Icon: Check, cls: "bg-emerald-100 text-emerald-700" },
-  needed: { label: "Sync needed", Icon: UploadCloud, cls: "bg-amber-100 text-amber-700" },
-  failed: { label: "Sync failed", Icon: AlertTriangle, cls: "bg-rose-100 text-rose-700" },
-};
-
-function SyncBadge({ status }) {
-  const spec = SYNC_BADGE[status] || SYNC_BADGE.local;
-  const { label, Icon, cls } = spec;
-  return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`} title={label}>
-      <Icon size={11} /> {label}
-    </span>
-  );
-}
-
-function DesignCard({ p, status = "local", onOpen, onRename, onDuplicate, onDelete, onSetTags }) {
+function DesignCard({ p, onOpen, onRename, onDuplicate, onDelete }) {
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(p.name || "");
-  const [editingTags, setEditingTags] = useState(false);
-  const [tagsValue, setTagsValue] = useState("");
   const [busy, setBusy] = useState(false);
-  const [pos, setPos] = useState(null); // fixed-position coords for the portal menu
-  const menuRef = useRef(null); // trigger wrapper
-  const popRef = useRef(null); // portal menu
-  const btnRef = useRef(null); // three-dot button (anchor)
+  const [pos, setPos] = useState(null);
+  const menuRef = useRef(null);
+  const popRef = useRef(null);
+  const btnRef = useRef(null);
 
   useEffect(() => { setName(p.name || ""); }, [p.name]);
   useEffect(() => {
@@ -447,8 +342,6 @@ function DesignCard({ p, status = "local", onOpen, onRename, onDuplicate, onDele
       setMenu(false);
     }
     function onKey(e) { if (e.key === "Escape") setMenu(false); }
-    // The menu is fixed-positioned from the button's rect, so any scroll or
-    // resize invalidates it — close rather than let it drift.
     function onMove() { setMenu(false); }
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -462,15 +355,11 @@ function DesignCard({ p, status = "local", onOpen, onRename, onDuplicate, onDele
     };
   }, [menu]);
 
-  // Open the menu anchored to the button, flipping above / clamping to the
-  // viewport so it stays fully visible for any card position or screen edge.
   function openMenu() {
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const menuW = 160;
-    const menuH = 176; // ~4 items + padding
-    const gap = 4;
+    const menuW = 160, menuH = 136, gap = 4;
     let left = Math.min(r.right - menuW, window.innerWidth - 8 - menuW);
     if (left < 8) left = 8;
     let top = r.bottom + gap;
@@ -485,160 +374,49 @@ function DesignCard({ p, status = "local", onOpen, onRename, onDuplicate, onDele
   async function commitRename() {
     const v = name.trim();
     setRenaming(false);
-    if (v && v !== p.name) await onRename(p.id, v);
+    if (v && v !== p.name) await onRename(p, v);
     else setName(p.name || "");
   }
   async function duplicate() {
     setMenu(false);
     setBusy(true);
-    try { await onDuplicate(p.id); } finally { setBusy(false); }
-  }
-  function startTags() {
-    setMenu(false);
-    setTagsValue((p.tags || []).join(", "));
-    setEditingTags(true);
-  }
-  async function commitTags() {
-    setEditingTags(false);
-    const parsed = tagsValue.split(",").map((t) => t.trim()).filter(Boolean);
-    await onSetTags?.(p.id, parsed);
+    try { await onDuplicate(p); } finally { setBusy(false); }
   }
 
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:border-brand-400 hover:shadow-md">
       <button type="button" onClick={() => onOpen(p.id)} className="relative block aspect-video w-full overflow-hidden bg-slate-100">
-        {p.thumbnail ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.thumbnail} alt={p.name} className="h-full w-full object-contain" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-slate-300"><ImageOff size={26} /></div>
-        )}
+        <div className="flex h-full w-full items-center justify-center text-slate-300"><ImageOff size={26} /></div>
       </button>
       <div className="flex items-center justify-between gap-2 px-3 py-2.5">
         <div className="min-w-0 flex-1">
           {renaming ? (
-            <input
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitRename();
-                if (e.key === "Escape") { setName(p.name || ""); setRenaming(false); }
-              }}
-              className="w-full rounded border border-brand-400 px-1.5 py-0.5 text-sm font-semibold text-slate-800 outline-none"
-            />
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onBlur={commitRename}
+              onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") { setName(p.name || ""); setRenaming(false); } }}
+              className="w-full rounded border border-brand-400 px-1.5 py-0.5 text-sm font-semibold text-slate-800 outline-none" />
           ) : (
-            <p
-              className="truncate text-sm font-semibold text-slate-800"
-              title={p.name || "Untitled"}
-              onDoubleClick={() => setRenaming(true)}
-            >
-              {p.name || "Untitled"}
-            </p>
+            <p className="truncate text-sm font-semibold text-slate-800" title={p.name || "Untitled"} onDoubleClick={() => setRenaming(true)}>{p.name || "Untitled"}</p>
           )}
           <p className="text-[11px] text-slate-400">Edited {formatDate(p.updatedAt)} · {p.width}×{p.height}</p>
-          <div className="mt-1"><SyncBadge status={status} /></div>
-          {editingTags ? (
-            <input
-              autoFocus
-              value={tagsValue}
-              onChange={(e) => setTagsValue(e.target.value)}
-              onBlur={commitTags}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitTags();
-                if (e.key === "Escape") setEditingTags(false);
-              }}
-              placeholder="tags, comma, separated"
-              className="mt-1 w-full rounded border border-brand-400 px-1.5 py-0.5 text-[11px] text-slate-700 outline-none"
-            />
-          ) : (
-            (p.tags || []).length > 0 && (
-              <div className="mt-1 flex flex-wrap gap-1">
-                {(p.tags || []).slice(0, 3).map((t) => (
-                  <span key={t} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">#{t}</span>
-                ))}
-                {(p.tags || []).length > 3 && <span className="text-[10px] text-slate-400">+{(p.tags || []).length - 3}</span>}
-              </div>
-            )
-          )}
         </div>
         <div className="relative" ref={menuRef}>
-          <button
-            ref={btnRef}
-            type="button"
-            aria-label="Design actions"
-            aria-haspopup="menu"
-            aria-expanded={menu}
+          <button ref={btnRef} type="button" aria-label="Design actions" aria-haspopup="menu" aria-expanded={menu}
             onClick={() => (menu ? setMenu(false) : openMenu())}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-          >
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
             <MoreVertical size={16} />
           </button>
           {menu && pos && createPortal(
-            <div
-              ref={popRef}
-              role="menu"
-              style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
-              className="z-[200] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl"
-            >
-              <button type="button" role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
-                <Pencil size={14} /> Rename
-              </button>
-              <button type="button" role="menuitem" onClick={duplicate} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
-                <Copy size={14} /> Duplicate
-              </button>
-              <button type="button" role="menuitem" onClick={startTags} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100">
-                <Tag size={14} /> Edit tags
-              </button>
-              <button type="button" role="menuitem" onClick={() => { setMenu(false); onDelete(p); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50">
-                <Trash2 size={14} /> Delete
-              </button>
+            <div ref={popRef} role="menu" style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+              className="z-[200] overflow-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+              <button type="button" role="menuitem" onClick={() => { setMenu(false); setRenaming(true); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"><Pencil size={14} /> Rename</button>
+              <button type="button" role="menuitem" onClick={duplicate} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"><Copy size={14} /> Duplicate</button>
+              <button type="button" role="menuitem" onClick={() => { setMenu(false); onDelete(p); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50"><Trash2 size={14} /> Delete</button>
             </div>,
             document.body
           )}
         </div>
       </div>
-      {busy && (
-        <div className="absolute inset-0 flex items-center justify-center bg-white/60">
-          <Loader2 size={18} className="animate-spin text-brand-600" />
-        </div>
-      )}
+      {busy && <div className="absolute inset-0 flex items-center justify-center bg-white/60"><Loader2 size={18} className="animate-spin text-brand-600" /></div>}
     </div>
-  );
-}
-
-// Unobtrusive automatic-sync status in the header. Nothing is shown for guests
-// or when idle, so the local-first experience stays visually unchanged.
-function SyncStatusChip({ state }) {
-  const map = {
-    syncing: { label: "Syncing…", Icon: Loader2, cls: "text-slate-500", spin: true },
-    synced: { label: "Synced", Icon: Cloud, cls: "text-emerald-600" },
-    offline: { label: "Offline", Icon: CloudOff, cls: "text-slate-400" },
-    failed: { label: "Sync failed", Icon: AlertTriangle, cls: "text-amber-600" },
-    pending: { label: "Awaiting approval", Icon: Clock, cls: "text-amber-600" },
-  };
-  const s = map[state];
-  if (!s) return null;
-  const { label, Icon, cls, spin } = s;
-  return (
-    <span className={`hidden items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium sm:inline-flex ${cls}`} title={label}>
-      <Icon size={15} className={spin ? "animate-spin" : ""} /> <span className="hidden md:inline">{label}</span>
-    </span>
-  );
-}
-
-function HomeChip({ active, onClick, children }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={
-        "inline-flex shrink-0 items-center rounded-full border px-3 py-1.5 text-xs font-medium transition " +
-        (active ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300")
-      }
-    >
-      {children}
-    </button>
   );
 }

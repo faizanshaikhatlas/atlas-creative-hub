@@ -3,8 +3,9 @@
 import dynamic from "next/dynamic";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Loader2, FileQuestion } from "lucide-react";
-import { getProject } from "@/lib/db/projects";
+import { Loader2, FileQuestion, ShieldAlert } from "lucide-react";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { apiGetProject } from "@/lib/designs/client";
 
 // Fabric.js is browser-only, so the whole editor is loaded client-side only.
 const Editor = dynamic(() => import("@/components/editor/Editor"), {
@@ -27,58 +28,45 @@ export default function EditorPage() {
   const params = useParams();
   const router = useRouter();
   const id = params?.id;
+  const { configured, loading: authLoading, user, active } = useAuth();
   const [state, setState] = useState({ status: "loading", project: null });
 
   useEffect(() => {
-    let active = true;
-    getProject(id)
-      .then((project) => {
-        if (!active) return;
-        setState(
-          project
-            ? { status: "ready", project }
-            : { status: "notfound", project: null }
-        );
-      })
+    if (authLoading) return;
+    if (!configured) { setState({ status: "error", project: null }); return; }
+    if (!user) { router.replace(`/login?next=/editor/${id}`); return; }
+
+    let alive = true;
+    setState({ status: "loading", project: null });
+    apiGetProject(id, user.id)
+      .then((project) => { if (alive) setState({ status: "ready", project }); })
       .catch((err) => {
-        console.error("Failed to open project:", err);
-        if (active) setState({ status: "error", project: null });
+        if (!alive) return;
+        if (err?.status === 403) setState({ status: "pending", project: null });
+        else if (err?.status === 404) setState({ status: "notfound", project: null });
+        else setState({ status: "error", project: null });
       });
-    return () => {
-      active = false;
-    };
-  }, [id]);
+    return () => { alive = false; };
+  }, [id, authLoading, configured, user, active, router]);
 
-  if (state.status === "loading") {
-    return <FullScreenSpinner label="Opening project…" />;
-  }
+  if (state.status === "loading") return <FullScreenSpinner label="Opening design…" />;
+  if (state.status === "ready") return <Editor project={state.project} />;
 
-  if (state.status === "ready") {
-    return <Editor project={state.project} />;
-  }
-
-  // notfound or error
+  const messages = {
+    pending: { icon: <ShieldAlert size={40} className="text-amber-500" />, title: "Awaiting approval", body: "Your account is awaiting administrator approval before you can open and edit designs." },
+    notfound: { icon: <FileQuestion size={40} className="text-slate-400" />, title: "Design not found", body: "This design may have been deleted, or it belongs to a different account." },
+    error: { icon: <FileQuestion size={40} className="text-slate-400" />, title: "Something went wrong", body: "We couldn’t open this design. Check your connection and try again." },
+  };
+  const m = messages[state.status] || messages.error;
   return (
     <div className="flex h-dvh flex-col items-center justify-center gap-4 bg-slate-100 p-6 text-center">
-      <FileQuestion size={40} className="text-slate-400" />
+      {m.icon}
       <div>
-        <p className="text-lg font-semibold text-slate-800">
-          {state.status === "error"
-            ? "Something went wrong"
-            : "Project not found"}
-        </p>
-        <p className="mt-1 text-sm text-slate-500">
-          {state.status === "error"
-            ? "The project database could not be read in this browser."
-            : "This project may have been deleted, or the link is from a different browser."}
-        </p>
+        <p className="text-lg font-semibold text-slate-800">{m.title}</p>
+        <p className="mt-1 text-sm text-slate-500">{m.body}</p>
       </div>
-      <button
-        type="button"
-        onClick={() => router.push("/")}
-        className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
-      >
-        Back to projects
+      <button type="button" onClick={() => router.push("/")} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
+        Back to dashboard
       </button>
     </div>
   );

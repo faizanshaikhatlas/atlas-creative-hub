@@ -3,10 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Eye, Sparkles, ImageOff } from "lucide-react";
-import { FORMATS, THEME_BY_ID, renderTemplateThumbnail, createDesignFromTemplate } from "@/lib/template-catalog";
+import { FORMATS, THEME_BY_ID, renderTemplateThumbnail, buildTemplateDesign } from "@/lib/template-catalog";
+import { apiCreateProject } from "@/lib/designs/client";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 export default function TemplateCard({ template, onPreview, onError }) {
   const router = useRouter();
+  const { configured, user, active } = useAuth();
   const ref = useRef(null);
   const [src, setSrc] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -31,14 +34,18 @@ export default function TemplateCard({ template, onPreview, onError }) {
   }, [template]);
 
   async function use() {
+    if (!configured) { onError?.("Cloud is not configured for this deployment."); return; }
+    if (!user) { router.push(`/login?next=${encodeURIComponent("/templates")}`); return; }
+    if (!active) { onError?.("Your account is awaiting administrator approval before you can create designs."); return; }
     setCreating(true);
     try {
-      const id = await createDesignFromTemplate(template);
-      router.push(`/editor/${id}`);
+      const payload = await buildTemplateDesign(template);
+      const res = await apiCreateProject(payload, user.id);
+      router.push(`/editor/${res.id}`);
     } catch (e) {
       console.error(e);
       setCreating(false);
-      onError?.("Could not create a design from this template.");
+      onError?.(e?.status === 403 ? "Your account is awaiting approval." : "Could not create a design from this template.");
     }
   }
 

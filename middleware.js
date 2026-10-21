@@ -32,7 +32,9 @@ export async function middleware(request) {
     pathname.startsWith("/admin/") ||
     pathname === "/account" ||
     pathname.startsWith("/account/") ||
-    (REQUIRE_AUTH && (pathname === "/" || pathname.startsWith("/editor")));
+    pathname === "/editor" ||
+    pathname.startsWith("/editor/") ||
+    (REQUIRE_AUTH && pathname === "/");
 
   if (needsAuth && !user) {
     const loginUrl = new URL("/login", request.url);
