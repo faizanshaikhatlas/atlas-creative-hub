@@ -15,6 +15,8 @@ const AuthContext = createContext({
   user: null,
   session: null,
   dbScope: "guest",
+  active: false,
+  online: true,
   signInWithPassword: async () => {},
   signUpWithEmail: async () => {},
   signInWithMagicLink: async () => {},
@@ -31,6 +33,12 @@ export function AuthProvider({ children }) {
   // signed out; "u-<uid>" when signed in. Consumers (e.g. the dashboard) read
   // this and re-query local designs whenever it changes.
   const [dbScope, setScopeState] = useState(scopeForUser(null));
+  // Authoritative approval state (server-resolved via /api/me; never inferred on
+  // the client). null = unknown/loading; true only for an approved, non-disabled
+  // member. Automatic cloud sync is gated on this (the DB RLS enforces it too).
+  const [active, setActive] = useState(false);
+  // Connectivity, so sync UIs can show an honest "Offline" state.
+  const [online, setOnline] = useState(true);
 
   // Keep the local DB namespace in lock-step with auth: sign-in, sign-out,
   // account switch, and session restore all funnel through `session.user.id`.
@@ -41,6 +49,32 @@ export function AuthProvider({ children }) {
     setDbScope(scope);
     setScopeState(scope);
   }, [session?.user?.id]);
+
+  // Resolve approval from the authoritative server endpoint whenever the user
+  // changes. Signed-out → not active.
+  useEffect(() => {
+    if (!configured || !session?.user) { setActive(false); return; }
+    let alive = true;
+    fetch("/api/me")
+      .then((r) => r.json())
+      .then((d) => { if (alive) setActive(d?.active === true); })
+      .catch(() => { if (alive) setActive(false); });
+    return () => { alive = false; };
+  }, [configured, session?.user?.id]);
+
+  // Track connectivity for honest sync status.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setOnline(navigator.onLine !== false);
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    return () => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    };
+  }, []);
 
   useEffect(() => {
     if (!configured) return;
@@ -145,6 +179,8 @@ export function AuthProvider({ children }) {
     loading,
     session,
     dbScope,
+    active,
+    online,
     user: session?.user ?? null,
     signInWithPassword,
     signUpWithEmail,

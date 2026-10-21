@@ -16,6 +16,9 @@ import {
   Grid3x3,
   Play,
   Keyboard,
+  Cloud,
+  CloudOff,
+  AlertTriangle,
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 
@@ -42,6 +45,7 @@ export default function Toolbar({ controllerRef, onBack, onExport, onPresent, on
   const canRedo = useEditorStore((s) => s.canRedo);
   const isSaving = useEditorStore((s) => s.isSaving);
   const isDirty = useEditorStore((s) => s.isDirty);
+  const cloudStatus = useEditorStore((s) => s.cloudStatus);
   const canvasReady = useEditorStore((s) => s.canvasReady);
   const snapEnabled = useEditorStore((s) => s.snapEnabled);
   const setSnapEnabled = useEditorStore((s) => s.setSnapEnabled);
@@ -102,7 +106,7 @@ export default function Toolbar({ controllerRef, onBack, onExport, onPresent, on
         className="min-w-0 max-w-[40vw] flex-1 truncate rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-slate-900 outline-none hover:border-slate-200 focus:border-brand-500 focus:bg-white sm:max-w-xs"
       />
 
-      <div className="hidden items-center text-xs text-slate-400 sm:flex">
+      <div className="hidden items-center gap-3 text-xs text-slate-400 sm:flex">
         {isSaving ? (
           <span className="inline-flex items-center gap-1">
             <Loader2 size={13} className="animate-spin" /> Saving…
@@ -112,6 +116,27 @@ export default function Toolbar({ controllerRef, onBack, onExport, onPresent, on
         ) : (
           <span className="inline-flex items-center gap-1 text-emerald-600">
             <Check size={13} /> Saved
+          </span>
+        )}
+        {/* Automatic cloud-sync status (only when there's something to report). */}
+        {cloudStatus === "saving" && (
+          <span className="inline-flex items-center gap-1 text-slate-400">
+            <Loader2 size={13} className="animate-spin" /> Syncing…
+          </span>
+        )}
+        {cloudStatus === "saved" && (
+          <span className="inline-flex items-center gap-1 text-emerald-600" title="Saved to your cloud account">
+            <Cloud size={13} /> Synced
+          </span>
+        )}
+        {cloudStatus === "offline" && (
+          <span className="inline-flex items-center gap-1 text-slate-400" title="You're offline — changes are saved on this device and will sync when you reconnect">
+            <CloudOff size={13} /> Offline
+          </span>
+        )}
+        {cloudStatus === "failed" && (
+          <span className="inline-flex items-center gap-1 text-amber-600" title="Cloud sync failed — changes are saved on this device and will retry">
+            <AlertTriangle size={13} /> Sync failed
           </span>
         )}
       </div>

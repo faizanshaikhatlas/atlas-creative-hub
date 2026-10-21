@@ -3,22 +3,19 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Tag, CloudOff, UploadCloud, AlertTriangle, Check, Download, X } from "lucide-react";
+import { Plus, Trash2, Loader2, ImageOff, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, Tag, Cloud, CloudOff, UploadCloud, AlertTriangle, Check, Clock } from "lucide-react";
 import {
   listProjects,
   createProject,
   duplicateProject,
   renameProject,
   setProjectTags,
-  countLegacyDesigns,
-  importLegacyDesigns,
   SIZE_PRESETS,
 } from "@/lib/db/projects";
-import { classifySyncStatus, listProjectSyncStates, deleteDesign, isOwnedByUser } from "@/lib/sync/sync";
+import { classifySyncStatus, listProjectSyncStates, deleteDesign, isOwnedByUser, syncPull, pushProjectSafe } from "@/lib/sync/sync";
 import { THEMES } from "@/lib/template-catalog/formats";
 import NewDesignDialog from "@/components/NewDesignDialog";
 import AccountMenu from "@/components/auth/AccountMenu";
-import CloudSync from "@/components/cloud/CloudSync";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 // Representative photo per theme for the browse tiles (already in /public).
@@ -47,7 +44,7 @@ function formatDate(ts) {
 
 export default function HomePage() {
   const router = useRouter();
-  const { configured, loading: authLoading, user, dbScope } = useAuth();
+  const { configured, loading: authLoading, user, dbScope, active, online } = useAuth();
   const [projects, setProjects] = useState(null); // null = loading
   const [syncStates, setSyncStates] = useState({});
   const [creating, setCreating] = useState(false);
@@ -57,23 +54,56 @@ export default function HomePage() {
   const [sortBy, setSortBy] = useState("recent"); // "recent" | "name"
   const [tagFilter, setTagFilter] = useState("all");
   const [error, setError] = useState(null);
-  // Legacy-design recovery (opt-in import from the pre-isolation database).
-  const [legacyCount, setLegacyCount] = useState(0);
-  const [legacyDismissed, setLegacyDismissed] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [importMsg, setImportMsg] = useState(null);
   const [deleteMsg, setDeleteMsg] = useState(null); // { tone: "ok"|"warn", text }
+  // Automatic-sync status for the header chip.
+  const [syncState, setSyncState] = useState("idle"); // idle|syncing|synced|offline|failed|pending
 
   const userId = user?.id ?? null;
+  // Cloud is authoritative only for a signed-in, APPROVED owner who is online.
+  const cloudActive = configured && !!userId && active && online;
 
+  // Read the local cache (per-account IndexedDB) into the dashboard.
+  async function loadLocal() {
+    const [list, states] = await Promise.all([
+      listProjects(),
+      listProjectSyncStates().catch(() => ({})),
+    ]);
+    setProjects(list);
+    setSyncStates(states || {});
+    return { list, states: states || {} };
+  }
+
+  // One automatic reconcile: pull the owner's cloud designs into the local cache
+  // (tombstone-aware — deleted designs never return), render them, then push any
+  // locally-changed owned designs back up. No manual Sync button, no import.
   async function refresh() {
     try {
-      const [list, states] = await Promise.all([
-        listProjects(),
-        listProjectSyncStates().catch(() => ({})),
-      ]);
-      setProjects(list);
-      setSyncStates(states || {});
+      if (!cloudActive) {
+        // Guest, pending approval, or offline → show the local cache as-is. For a
+        // signed-in-but-unapproved user this is only their own scoped designs.
+        await loadLocal();
+        setSyncState(configured && userId && !active ? "pending" : online ? "idle" : "offline");
+        return;
+      }
+      setSyncState("syncing");
+      let pullOk = true;
+      try {
+        await syncPull(userId); // cloud → local cache
+      } catch {
+        pullOk = false;
+      }
+      const { list, states } = await loadLocal();
+      // Auto-push owned designs whose local edits aren't in the cloud yet.
+      let pushFailed = false;
+      const dirty = list.filter(
+        (p) => isOwnedByUser(p, userId) && ["needed", "failed"].includes(classifySyncStatus(p, states[p.id], { configured, userId }))
+      );
+      for (const p of dirty) {
+        const res = await pushProjectSafe(p.id, userId);
+        if (res.status !== "ok" && res.status !== "skipped") pushFailed = true;
+      }
+      if (dirty.length) await loadLocal(); // refresh badges after pushes
+      setSyncState(pullOk && !pushFailed ? "synced" : "failed");
     } catch (err) {
       console.error(err);
       setError("Local storage (IndexedDB) is unavailable in this browser. Designs cannot be saved.");
@@ -81,48 +111,20 @@ export default function HomePage() {
     }
   }
 
-  // Re-query local designs whenever the account scope changes (sign-in, sign-out,
-  // account switch, session restore). Waiting for auth to settle avoids showing
-  // the guest set for a split second before a restored session resolves.
+  // Clear immediately on account switch / sign-out so a previous account's
+  // designs can never linger on screen while the new account's load runs.
   useEffect(() => {
-    if (configured && authLoading) return;
-    // Clear immediately so a previous account's designs can never linger on
-    // screen during the async reload after an account switch / sign-out.
     setProjects(null);
     setSyncStates({});
-    refresh();
-  }, [dbScope, configured, authLoading]);
+  }, [dbScope]);
 
-  // Detect recoverable legacy designs once (count only; read-only).
+  // Automatically load + sync whenever auth settles or connectivity/approval
+  // changes (e.g. reconnecting, or an admin approving the account mid-session).
   useEffect(() => {
-    let active = true;
-    countLegacyDesigns()
-      .then((n) => { if (active) setLegacyCount(n); })
-      .catch(() => { if (active) setLegacyCount(0); });
-    return () => { active = false; };
-  }, []);
-
-  async function handleImportLegacy() {
-    setImporting(true);
-    setImportMsg(null);
-    try {
-      const { imported, skipped } = await importLegacyDesigns();
-      setImportMsg(
-        imported > 0
-          ? `Imported ${imported} design${imported === 1 ? "" : "s"}${skipped ? ` (${skipped} already here)` : ""}.`
-          : skipped
-          ? "These designs are already in this workspace."
-          : "No legacy designs to import."
-      );
-      setLegacyDismissed(true);
-      await refresh();
-    } catch (err) {
-      console.error(err);
-      setImportMsg("Could not import legacy designs.");
-    } finally {
-      setImporting(false);
-    }
-  }
+    if (configured && authLoading) return;
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbScope, configured, authLoading, active, online]);
 
   async function quickCreate({ type, width, height } = {}) {
     setShowNew(false);
@@ -193,7 +195,7 @@ export default function HomePage() {
               className="hidden rounded-xl px-3 py-2 text-sm font-medium text-slate-600 transition hover:text-brand-700 sm:inline-flex">
               Templates
             </button>
-            <CloudSync onSynced={refresh} />
+            <SyncStatusChip state={syncState} />
             <AccountMenu />
             <button type="button" onClick={() => setShowNew(true)} disabled={creating}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60">
@@ -233,43 +235,11 @@ export default function HomePage() {
           <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{error}</div>
         )}
 
-        {/* Legacy-design recovery: offered only when the old shared database has
-            designs and nothing has been imported/dismissed yet this view. */}
-        {legacyCount > 0 && !legacyDismissed && (
-          <div className="mb-6 flex flex-col gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-2.5 text-sm text-slate-700">
-              <Download size={18} className="mt-0.5 shrink-0 text-brand-600" />
-              <p>
-                We found <strong>{legacyCount}</strong> design{legacyCount === 1 ? "" : "s"} saved before account
-                separation. Import them into{" "}
-                <strong>{userId ? `your account (${user?.email})` : "this device (guest)"}</strong>?
-                Your originals are kept safe and nothing is deleted.
-              </p>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                onClick={handleImportLegacy}
-                disabled={importing}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
-              >
-                {importing ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}
-                {importing ? "Importing…" : "Import designs"}
-              </button>
-              <button
-                type="button"
-                onClick={() => setLegacyDismissed(true)}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-slate-500 transition hover:text-slate-700"
-                aria-label="Dismiss"
-                title="Not now"
-              >
-                <X size={15} />
-              </button>
-            </div>
+        {configured && userId && !active && (
+          <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Your account is awaiting administrator approval. Your designs are saved on this device and will
+            sync to your cloud account automatically once you&apos;re approved.
           </div>
-        )}
-        {importMsg && (
-          <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{importMsg}</div>
         )}
         {deleteMsg && (
           <div className={
@@ -625,6 +595,26 @@ function DesignCard({ p, status = "local", onOpen, onRename, onDuplicate, onDele
         </div>
       )}
     </div>
+  );
+}
+
+// Unobtrusive automatic-sync status in the header. Nothing is shown for guests
+// or when idle, so the local-first experience stays visually unchanged.
+function SyncStatusChip({ state }) {
+  const map = {
+    syncing: { label: "Syncing…", Icon: Loader2, cls: "text-slate-500", spin: true },
+    synced: { label: "Synced", Icon: Cloud, cls: "text-emerald-600" },
+    offline: { label: "Offline", Icon: CloudOff, cls: "text-slate-400" },
+    failed: { label: "Sync failed", Icon: AlertTriangle, cls: "text-amber-600" },
+    pending: { label: "Awaiting approval", Icon: Clock, cls: "text-amber-600" },
+  };
+  const s = map[state];
+  if (!s) return null;
+  const { label, Icon, cls, spin } = s;
+  return (
+    <span className={`hidden items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium sm:inline-flex ${cls}`} title={label}>
+      <Icon size={15} className={spin ? "animate-spin" : ""} /> <span className="hidden md:inline">{label}</span>
+    </span>
   );
 }
 

@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { useEditorStore } from "@/lib/store/editorStore";
 import { saveProject, createBlankPage } from "@/lib/db/projects";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { pushProjectSafe } from "@/lib/sync/sync";
 import CanvasStage from "@/components/editor/CanvasStage";
 import Toolbar from "@/components/editor/Toolbar";
 import ElementsPanel from "@/components/editor/ElementsPanel";
@@ -264,6 +266,33 @@ export default function Editor({ project }) {
 
   /* ----------------------------- save -------------------------------- */
 
+  // Auth is read through a ref so the save callbacks don't need to be recreated
+  // (and re-fire the debounce) every time the session/approval changes.
+  const { configured, user, active, online } = useAuth();
+  const authRef = useRef({ configured, user, active, online });
+  authRef.current = { configured, user, active, online };
+  const cloudPushTimer = useRef(null);
+
+  // Automatic, debounced cloud push after a successful local save. Only for a
+  // signed-in, APPROVED owner (guests/pending users stay local-only — honest
+  // status, no failed-upload noise). Failure-aware via pushProjectSafe.
+  const scheduleCloudPush = useCallback(() => {
+    const a = authRef.current;
+    if (!a.configured || !a.user || !a.active) return;
+    if (cloudPushTimer.current) clearTimeout(cloudPushTimer.current);
+    cloudPushTimer.current = setTimeout(async () => {
+      const store = useEditorStore.getState();
+      const u = authRef.current.user;
+      if (!u) return;
+      store.setCloudStatus("saving");
+      const res = await pushProjectSafe(project.id, u.id);
+      if (res.status === "ok") store.setCloudStatus("saved");
+      else store.setCloudStatus(authRef.current.online === false ? "offline" : "failed");
+    }, 1500);
+  }, [project.id]);
+
+  useEffect(() => () => { if (cloudPushTimer.current) clearTimeout(cloudPushTimer.current); }, []);
+
   const doSave = useCallback(async () => {
     const c = controllerRef.current;
     if (!c) return;
@@ -285,12 +314,13 @@ export default function Editor({ project }) {
         name: store.projectName,
       });
       store.markSaved();
+      scheduleCloudPush(); // mirror the save to the owner's cloud (if approved)
     } catch (err) {
       console.error("Save failed:", err);
       store.setSaving(false);
       showToast("Could not save the project.");
     }
-  }, [project.id, captureActive, showToast]);
+  }, [project.id, captureActive, showToast, scheduleCloudPush]);
 
   // Debounced autosave: every canvas change or page op bumps `rev`.
   useEffect(() => {
