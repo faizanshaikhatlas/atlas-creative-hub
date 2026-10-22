@@ -36,7 +36,7 @@ const CREATE_SHORTCUTS = [
   { key: "templates", label: "Templates", Icon: LayoutTemplate, kind: "nav", href: "/templates" },
   { key: "presentation", label: "Presentation", Icon: Presentation, kind: "create", type: "presentation" },
   { key: "social", label: "Social media", Icon: Share2, kind: "nav", href: "/create/social" },
-  { key: "video", label: "Video", Icon: Video, kind: "unavailable", note: "Video projects aren’t supported yet — ATLAS designs are static canvases. You can still make a video-sized canvas via “Custom size”." },
+  { key: "video", label: "Video", Icon: Video, kind: "nav", href: "/create/video" },
   { key: "doc", label: "Doc", Icon: FileText, kind: "unavailable", note: "Documents aren’t available yet in ATLAS." },
   { key: "whiteboard", label: "Whiteboard", Icon: PenTool, kind: "unavailable", note: "Whiteboards aren’t available yet in ATLAS." },
   { key: "sheet", label: "Sheet", Icon: Table, kind: "unavailable", note: "Sheets aren’t available yet in ATLAS." },
@@ -60,6 +60,7 @@ function formatDate(ts) {
 
 // Human format label from the design's stored type (custom sizes → "Custom").
 function formatLabelFor(type) {
+  if (type === "video") return "Video";
   const preset = SIZE_PRESETS.find((s) => s.id === type);
   return preset ? preset.label : "Custom";
 }

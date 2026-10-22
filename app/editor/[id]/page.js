@@ -13,6 +13,12 @@ const Editor = dynamic(() => import("@/components/editor/Editor"), {
   loading: () => <FullScreenSpinner label="Loading editor…" />,
 });
 
+// Video projects open a separate editor (never the static Fabric design editor).
+const VideoEditor = dynamic(() => import("@/components/video/VideoEditor"), {
+  ssr: false,
+  loading: () => <FullScreenSpinner label="Loading video editor…" />,
+});
+
 function FullScreenSpinner({ label }) {
   return (
     <div className="flex h-dvh items-center justify-center bg-slate-100">
@@ -50,7 +56,13 @@ export default function EditorPage() {
   }, [id, authLoading, configured, user, active, router]);
 
   if (state.status === "loading") return <FullScreenSpinner label="Opening design…" />;
-  if (state.status === "ready") return <Editor project={state.project} />;
+  if (state.status === "ready") {
+    // Route video projects to the video editor; everything else stays on the
+    // existing static design editor (unchanged).
+    return state.project?.type === "video"
+      ? <VideoEditor project={state.project} />
+      : <Editor project={state.project} />;
+  }
 
   const messages = {
     pending: { icon: <ShieldAlert size={40} className="text-amber-500" />, title: "Awaiting approval", body: "Your account is awaiting administrator approval before you can open and edit designs." },
