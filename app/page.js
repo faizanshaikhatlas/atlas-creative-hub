@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Plus, Trash2, Loader2, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, LogIn, LayoutTemplate, Presentation, Share2, Video, FileText, Table, PenTool, Scaling, Upload, MoreHorizontal, AlertTriangle, RefreshCw } from "lucide-react";
+import { Plus, Trash2, Loader2, Search, Sparkles, ArrowRight, MoreVertical, Pencil, Copy, LogIn, LayoutTemplate, Presentation, Share2, Video, FileText, Table, PenTool, Scaling, Upload, MoreHorizontal, AlertTriangle, RefreshCw, Printer } from "lucide-react";
 import { SIZE_PRESETS } from "@/lib/db/projects";
 import { apiListProjects, apiCreateProject, apiDeleteProject, apiGetProject, apiUpdateProject } from "@/lib/designs/client";
 import { THEMES } from "@/lib/template-catalog/formats";
@@ -35,7 +35,7 @@ const THEME_PHOTO = {
 const CREATE_SHORTCUTS = [
   { key: "templates", label: "Templates", Icon: LayoutTemplate, kind: "nav", href: "/templates" },
   { key: "presentation", label: "Presentation", Icon: Presentation, kind: "create", type: "presentation" },
-  { key: "social", label: "Social media", Icon: Share2, kind: "dialog" },
+  { key: "social", label: "Social media", Icon: Share2, kind: "nav", href: "/create/social" },
   { key: "video", label: "Video", Icon: Video, kind: "unavailable", note: "Video projects aren’t supported yet — ATLAS designs are static canvases. You can still make a video-sized canvas via “Custom size”." },
   { key: "doc", label: "Doc", Icon: FileText, kind: "unavailable", note: "Documents aren’t available yet in ATLAS." },
   { key: "whiteboard", label: "Whiteboard", Icon: PenTool, kind: "unavailable", note: "Whiteboards aren’t available yet in ATLAS." },
@@ -234,9 +234,10 @@ export default function HomePage() {
               Templates
             </button>
             <AccountMenu />
-            <button type="button" onClick={openCreateDialog} disabled={creating}
-              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60">
-              {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create a design
+            <button type="button" onClick={openCreateDialog} disabled={creating} aria-label="Create a design"
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:opacity-60 sm:px-4">
+              {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              <span className="hidden sm:inline">Create a design</span>
             </button>
           </div>
         </div>
@@ -360,6 +361,39 @@ export default function HomePage() {
 
         {/* Brand & uploads — discoverability for existing (in-editor) features */}
         {active === true && <HomeBrandUploads onUse={openCreateDialog} />}
+
+        {/* Print & export — honest: ATLAS creates + exports print-ready files, but
+            does NOT offer print ordering/delivery (no provider is integrated). */}
+        {active === true && (
+          <section className="mb-12">
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">Print &amp; export</h2>
+            <p className="mb-4 text-xs text-slate-400">Create print-ready designs and download them yourself.</p>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-100 to-brand-200 text-brand-700"><Printer size={17} /></span>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Make something to print</p>
+                    <p className="mt-1 max-w-xl text-xs leading-relaxed text-slate-500">
+                      Design a poster or a custom print size, then export a <strong>print-ready PDF</strong> (or PNG/JPG) from the editor’s Export menu.
+                      Online print ordering and delivery isn’t available in ATLAS — you download the file and print it yourself.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button type="button" onClick={() => quickCreate({ type: "custom", width: 1080, height: 1350 })}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-700">
+                    Start a poster
+                  </button>
+                  <button type="button" onClick={openCreateDialog}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition hover:border-brand-400">
+                    Custom size
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Recommended templates — a curated static selection (not personalized) */}
         <section className="mb-12">

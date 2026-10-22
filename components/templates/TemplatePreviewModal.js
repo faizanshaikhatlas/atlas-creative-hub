@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { X, Loader2, Sparkles } from "lucide-react";
 import { FORMATS, renderTemplateThumbnail, buildTemplateDesign } from "@/lib/template-catalog";
 import { apiCreateProject } from "@/lib/designs/client";
+import { recordTemplateView } from "@/lib/template-catalog/recentlyViewed";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 /**
@@ -27,6 +28,7 @@ export default function TemplatePreviewModal({ template, onClose, onError }) {
   }, [template]);
 
   async function use() {
+    recordTemplateView(template.id); // device-local recents (no sensitive data)
     if (!configured) { onError?.("Cloud is not configured for this deployment."); onClose(); return; }
     if (!user) { router.push(`/login?next=${encodeURIComponent("/templates")}`); return; }
     if (!active) { onError?.("Your account is awaiting administrator approval before you can create designs."); onClose(); return; }

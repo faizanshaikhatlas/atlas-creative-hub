@@ -87,10 +87,11 @@ export default function AccountMenu() {
       {isAdmin && (
         <Link
           href="/admin"
+          aria-label="Admin"
           title={pending > 0 ? `${pending} account(s) awaiting approval` : "Admin"}
           className="relative inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-brand-700 transition hover:border-brand-400"
         >
-          <Shield size={15} /> Admin
+          <Shield size={15} /> <span className="hidden sm:inline">Admin</span>
           {pending > 0 && (
             <span className="ml-0.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
               {pending > 99 ? "99+" : pending}
